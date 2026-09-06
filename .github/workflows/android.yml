@@ -45,4 +45,8 @@ jobs:
       - name: Build Debug APK
         run: flutter build apk --debug
 
-      
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-apk
+          path: YRed/build/app/outputs/flutter-apk/app-debug.apk
