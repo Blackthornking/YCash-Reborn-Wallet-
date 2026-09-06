@@ -14,10 +14,6 @@ jobs:
     name: Build YRed APK
     runs-on: ubuntu-latest
 
-    defaults:
-      run:
-        working-directory: YRed
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -26,7 +22,7 @@ jobs:
         uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: '17'
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
@@ -37,16 +33,40 @@ jobs:
         run: |
           pwd
           ls -la
-          ls -la android
+          find . -maxdepth 3 -type f -name "pubspec.yaml"
+
+      - name: Cache pub packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.pub-cache
+          key: ${{ runner.os }}-pub-${{ hashFiles('**/pubspec.yaml') }}
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
 
       - name: Get Flutter dependencies
         run: flutter pub get
 
-      - name: Build Debug APK
-        run: flutter build apk --debug
+      - name: Ensure Android SDK licenses accepted
+        run: |
+          # Accept Android licenses (may fail if Android SDK isn't installed on runner)
+          yes | flutter doctor --android-licenses || true
+          flutter doctor -v
 
-      - name: Upload APK artifact
+      - name: Build APK (change --release to --debug if you prefer)
+        run: flutter build apk --release --no-shrink
+
+      - name: Upload APK artifact(s)
         uses: actions/upload-artifact@v4
         with:
-          name: debug-apk
-          path: YRed/build/app/outputs/flutter-apk/app-debug.apk
+          name: android-apk
+          path: |
+            build/app/outputs/flutter-apk/app-release.apk
+            build/app/outputs/flutter-apk/app-debug.apk
+          if-no-files-found: error
