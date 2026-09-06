@@ -16,7 +16,7 @@ jobs:
         uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: 17
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
@@ -75,6 +75,11 @@ jobs:
           cd "$PROJECT_DIR/packages/warp_api_ffi"
           dart pub get
           dart run build_runner build --delete-conflicting-outputs
+      - name: Download Sapling params
+        run: |
+          mkdir -p "$PROJECT_DIR/assets"
+          curl -sSL https://download.z.cash/downloads/sapling-spend.params --output "$PROJECT_DIR/assets/sapling-spend.params"
+          curl -sSL https://download.z.cash/downloads/sapling-output.params --output "$PROJECT_DIR/assets/sapling-output.params"
       - name: Build Debug APK
         run: |
           cd "$PROJECT_DIR"
