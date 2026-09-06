@@ -1,4 +1,4 @@
-name: Build YRed Android APK
+name: Build YRed APK
 
 on:
   workflow_dispatch:
@@ -11,7 +11,6 @@ permissions:
 
 jobs:
   build:
-    name: Build YRed APK
     runs-on: ubuntu-latest
 
     steps:
@@ -22,19 +21,65 @@ jobs:
         uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: "17"
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: stable
 
-      - name: Show project files
+      - name: Extract YRed project
         run: |
-          pwd
-          ls -la
+          if [ -f "YRed.zip" ]; then
+            echo "Found YRed.zip — extracting..."
+            unzip -q YRed.zip -d extracted
+          else
+            echo "No YRed.zip found — using repository files."
+          fi
+
+      - name: Find Flutter project
+        run: |
+          echo "Repository contents:"
           find . -maxdepth 3 -type f -name "pubspec.yaml"
 
+          PROJECT_FILE=$(find extracted . -maxdepth 3 -type f -name "pubspec.yaml" 2>/dev/null | grep -v "/packages/" | head -n 1)
+
+          if [ -z "$PROJECT_FILE" ]; then
+            PROJECT_FILE=$(find . -maxdepth 3 -type f -name "pubspec.yaml" | grep -v "/packages/" | head -n 1)
+          fi
+
+          if [ -z "$PROJECT_FILE" ]; then
+            echo "ERROR: Could not find the main Flutter pubspec.yaml"
+            exit 1
+          fi
+
+          PROJECT_DIR=$(dirname "$PROJECT_FILE")
+
+          echo "PROJECT_DIR=$PROJECT_DIR" >> $GITHUB_ENV
+
+          echo "Flutter project found at:"
+          echo "$PROJECT_DIR"
+
+      - name: Get Flutter dependencies
+        run: |
+          cd "$PROJECT_DIR"
+          flutter pub get
+
+      - name: Build Debug APK
+        run: |
+          cd "$PROJECT_DIR"
+          flutter build apk --debug
+
+      - name: Find APK
+        run: |
+          find . -type f -name "app-debug.apk"
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: YRed-debug-APK
+          path: "**/app-debug.apk"
+          if-no-files-found: error
       - name: Cache pub packages
         uses: actions/cache@v4
         with:
