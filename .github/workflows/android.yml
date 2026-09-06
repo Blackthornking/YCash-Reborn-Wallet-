@@ -62,6 +62,10 @@ jobs:
         run: |
           cd "$PROJECT_DIR"
           flutter pub get
+      - name: Generate launcher icons
+        run: |
+          cd "$PROJECT_DIR"
+          dart run flutter_launcher_icons:main
       - name: Generate localization files
         run: |
           cd "$PROJECT_DIR"
