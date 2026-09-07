@@ -73,11 +73,63 @@ jobs:
           channel: stable
           cache: true
 
+      - name: Install Rust and native build dependencies
+        run: |
+          sudo apt-get update
+
+          sudo apt-get install -y \
+            bash \
+            build-essential \
+            cmake \
+            pkg-config \
+            clang \
+            libclang-dev \
+            curl
+
+          curl --proto '=https' --tlsv1.2 -sSf \
+            https://sh.rustup.rs | sh -s -- -y
+
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+          source "$HOME/.cargo/env"
+
+          echo "Rust:"
+          rustc --version
+
+          echo "Cargo:"
+          cargo --version
+
+          echo "CMake:"
+          cmake --version
+
+          echo "Bash:"
+          bash --version
+
+      - name: Verify native build environment
+        run: |
+          echo "Bash location:"
+          which bash
+
+          echo "Rust location:"
+          which rustc || true
+
+          echo "Cargo location:"
+          which cargo || true
+
+          echo "Checking bash binaries:"
+          ls -la /bin/bash
+          ls -la /usr/bin/bash || true
+
+          echo "PATH:"
+          echo "$PATH"
+
       - name: Show tool versions
         run: |
           flutter --version
           dart --version
           java -version
+          rustc --version
+          cargo --version
 
       - name: Get Flutter dependencies
         run: |
@@ -150,75 +202,63 @@ jobs:
               text = path.read_text()
               original = text
 
-              # ========================================
-              # Android Gradle Plugin
-              # ========================================
-
-              # Kotlin DSL:
-              # id("com.android.application") version "x.x.x"
+              # Android Gradle Plugin - Kotlin DSL
               text = re.sub(
                   r'(id\(\s*["\']com\.android\.(?:application|library)["\']\s*\)\s*version\s*["\'])[^"\']+',
                   r'\g<1>' + AGP_VERSION,
                   text
               )
 
-              # Groovy DSL:
-              # id "com.android.application" version "x.x.x"
+              # Android Gradle Plugin - Groovy DSL
               text = re.sub(
                   r'(id\s+["\']com\.android\.(?:application|library)["\']\s+version\s+["\'])[^"\']+',
                   r'\g<1>' + AGP_VERSION,
                   text
               )
 
-              # Old buildscript classpath format
+              # Old Android buildscript classpath
               text = re.sub(
                   r'(com\.android\.tools\.build:gradle:)[0-9A-Za-z.\-+]+',
                   r'\g<1>' + AGP_VERSION,
                   text
               )
 
-              # ========================================
-              # Kotlin Gradle Plugin
-              # ========================================
-
-              # Kotlin DSL:
-              # id("org.jetbrains.kotlin.android") version "x.x.x"
+              # Kotlin DSL
               text = re.sub(
                   r'(id\(\s*["\']org\.jetbrains\.kotlin\.android["\']\s*\)\s*version\s*["\'])[^"\']+',
                   r'\g<1>' + KOTLIN_VERSION,
                   text
               )
 
-              # Groovy DSL:
-              # id "org.jetbrains.kotlin.android" version "x.x.x"
+              # Groovy DSL
               text = re.sub(
                   r'(id\s+["\']org\.jetbrains\.kotlin\.android["\']\s+version\s+["\'])[^"\']+',
                   r'\g<1>' + KOTLIN_VERSION,
                   text
               )
 
-              # Other Kotlin plugin declarations
+              # Other Kotlin plugins
               text = re.sub(
                   r'(id\(\s*["\']org\.jetbrains\.kotlin(?:\.[a-z]+)*["\']\s*\)\s*version\s*["\'])[^"\']+',
                   r'\g<1>' + KOTLIN_VERSION,
                   text
               )
 
-              # Old ext.kotlin_version format
+              # ext.kotlin_version
               text = re.sub(
                   r'(ext\.kotlin_version\s*=\s*["\'])[^"\']+',
                   r'\g<1>' + KOTLIN_VERSION,
                   text
               )
 
-              # kotlin_version = "x.x.x"
+              # kotlin_version
               text = re.sub(
                   r'(kotlin_version\s*=\s*["\'])[^"\']+',
                   r'\g<1>' + KOTLIN_VERSION,
                   text
               )
 
-              # Old Kotlin Gradle plugin classpath
+              # Kotlin Gradle plugin classpath
               text = re.sub(
                   r'(org\.jetbrains\.kotlin:kotlin-gradle-plugin:)[0-9A-Za-z.\-+]+',
                   r'\g<1>' + KOTLIN_VERSION,
@@ -228,10 +268,6 @@ jobs:
               if text != original:
                   path.write_text(text)
                   print(f"Updated: {path}")
-
-          # ========================================
-          # Gradle Wrapper
-          # ========================================
 
           wrapper = android / "gradle" / "wrapper" / "gradle-wrapper.properties"
 
@@ -299,12 +335,18 @@ jobs:
       - name: Build debug APK
         run: |
           cd "$PROJECT_DIR"
-          flutter build apk --debug
+
+          export PATH="$HOME/.cargo/bin:$PATH"
+
+          flutter build apk --debug --verbose
 
       - name: Build release APK
         run: |
           cd "$PROJECT_DIR"
-          flutter build apk --release
+
+          export PATH="$HOME/.cargo/bin:$PATH"
+
+          flutter build apk --release --verbose
 
       - name: Show generated APKs
         run: |
