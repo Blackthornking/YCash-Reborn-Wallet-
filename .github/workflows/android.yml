@@ -1,4 +1,4 @@
-name: Build Android APK
+name: Build Ycash Wallet
 
 on:
   workflow_dispatch:
@@ -11,18 +11,14 @@ permissions:
 
 jobs:
   build:
-    name: Build Ycash Wallet
+    name: Build Android APK
     runs-on: ubuntu-latest
-
-    defaults:
-      run:
-        working-directory: phase48
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Java
+      - name: Set up Java 17
         uses: actions/setup-java@v5
         with:
           distribution: temurin
@@ -58,28 +54,12 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Ycash-Debug-APK
-          path: phase48/build/app/outputs/flutter-apk/app-debug.apk
+          path: build/app/outputs/flutter-apk/app-debug.apk
           if-no-files-found: error
 
       - name: Upload release APK
         uses: actions/upload-artifact@v4
         with:
           name: Ycash-Release-APK
-          path: phase48/build/app/outputs/flutter-apk/app-release.apk
+          path: build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
-      - name: Check for Flutter tests
-        run: |
-          if [ -d "test" ]; then
-            flutter test
-          else
-            echo "No test directory found. Skipping tests."
-          fi
-
-      - name: Build debug APK
-        run: flutter build apk --debug
-
-      - name: Build release APK
-        run: flutter build apk --release
-
-    
-      
