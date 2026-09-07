@@ -36,13 +36,13 @@ jobs:
           mkdir -p wallet_project
           unzip -q "$ZIP_FILE" -d wallet_project
 
-          echo "Extracted contents:"
-          find wallet_project -maxdepth 3 -type f -name "pubspec.yaml"
+          echo "Looking for Flutter project..."
+          find wallet_project -maxdepth 5 -type f -name "pubspec.yaml"
 
       - name: Find Flutter project
         id: flutter_project
         run: |
-          PROJECT_FILE=$(find wallet_project -name pubspec.yaml -print -quit)
+          PROJECT_FILE=$(find wallet_project -type f -name pubspec.yaml -print -quit)
 
           if [ -z "$PROJECT_FILE" ]; then
             echo "ERROR: Could not find pubspec.yaml"
@@ -71,19 +71,55 @@ jobs:
           java -version
           javac -version
 
+      - name: Restore Android host if needed
+        working-directory: ${{ steps.flutter_project.outputs.dir }}
+        run: |
+          if [ ! -d "android" ]; then
+            echo "Android directory is missing. Creating Android host..."
+            flutter create --platforms=android .
+          else
+            echo "Android directory already exists."
+          fi
+
+      - name: Pin Android Gradle Plugin below AGP 9
+        working-directory: ${{ steps.flutter_project.outputs.dir }}
+        run: |
+          echo "Checking Android Gradle configuration..."
+
+          if [ -f "android/settings.gradle.kts" ]; then
+            sed -i -E \
+              's/(com\.android\.(application|library)".*version ")[^"]+/\18.7.3/g' \
+              android/settings.gradle.kts || true
+          fi
+
+          if [ -f "android/settings.gradle" ]; then
+            sed -i -E \
+              's/(com\.android\.(application|library) version ")[^"]+/\18.7.3/g' \
+              android/settings.gradle || true
+          fi
+
+          if [ -f "android/build.gradle" ]; then
+            sed -i -E \
+              "s/com\.android\.tools\.build:gradle:[0-9.]+/com.android.tools.build:gradle:8.7.3/g" \
+              android/build.gradle || true
+          fi
+
+          if [ -f "android/gradle/wrapper/gradle-wrapper.properties" ]; then
+            sed -i -E \
+              's/gradle-[0-9.]+-bin.zip/gradle-8.9-bin.zip/g' \
+              android/gradle/wrapper/gradle-wrapper.properties
+          fi
+
+          echo "Android configuration:"
+          find android -maxdepth 2 \( -name "settings.gradle" -o -name "settings.gradle.kts" -o -name "build.gradle" -o -name "build.gradle.kts" \) -print
+
       - name: Get Flutter dependencies
         working-directory: ${{ steps.flutter_project.outputs.dir }}
         run: flutter pub get
 
-      - name: Restore Android host if needed
+      - name: Clean previous build
         working-directory: ${{ steps.flutter_project.outputs.dir }}
-        run: |
-          if [ ! -f "android/gradle/wrapper/gradle-wrapper.properties" ]; then
-            echo "Android host files are missing. Restoring them..."
-            flutter create --platforms=android .
-          else
-            echo "Android host files already exist."
-          fi
+        run: flutter clean
 
       - name: Build Android APK
         working-directory: ${{ steps.flutter_project.outputs.dir }}
