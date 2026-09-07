@@ -49,11 +49,10 @@ jobs:
           unzip -q "$ZIP_FILE" -d extracted_project
 
           echo "Extracted contents:"
-          find extracted_project -maxdepth 4 -type f \( \
-            -name "pubspec.yaml" -o \
-            -name "settings.gradle" -o \
-            -name "settings.gradle.kts" \
-          \) -print
+          find extracted_project -maxdepth 5 \
+            -type f \
+            \( -name "pubspec.yaml" -o -name "settings.gradle" -o -name "settings.gradle.kts" \) \
+            -print
 
       - name: Locate Flutter project
         run: |
@@ -86,6 +85,7 @@ jobs:
         uses: subosito/flutter-action@v2
         with:
           channel: stable
+          cache: true
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
@@ -125,8 +125,32 @@ jobs:
           cargo --version
           cargo ndk --version
 
+          echo ""
           echo "Installed Rust targets:"
           rustup target list --installed
+
+      - name: Configure Flutter AGP compatibility
+        run: |
+          set -e
+
+          cd "$PROJECT_DIR"
+
+          mkdir -p android
+
+          GRADLE_PROPERTIES="android/gradle.properties"
+
+          touch "$GRADLE_PROPERTIES"
+
+          # Remove any existing android.newDsl setting
+          sed -i '/^android\.newDsl=/d' "$GRADLE_PROPERTIES"
+
+          # Disable the AGP 9 new DSL for Flutter compatibility
+          echo "" >> "$GRADLE_PROPERTIES"
+          echo "# GitHub Actions compatibility setting" >> "$GRADLE_PROPERTIES"
+          echo "android.newDsl=false" >> "$GRADLE_PROPERTIES"
+
+          echo "Final gradle.properties:"
+          cat "$GRADLE_PROPERTIES"
 
       - name: Get Flutter dependencies
         run: |
@@ -143,30 +167,6 @@ jobs:
             echo "Ycash verification script not found — skipping."
           fi
 
-      - name: Fix AGP 9 Flutter compatibility
-        run: |
-          set -e
-
-          cd "$PROJECT_DIR"
-
-          mkdir -p android
-
-          if [ -f android/gradle.properties ]; then
-            if grep -q "^android.newDsl=" android/gradle.properties; then
-              sed -i 's/^android.newDsl=.*/android.newDsl=false/' android/gradle.properties
-            else
-              echo "" >> android/gradle.properties
-              echo "android.newDsl=false" >> android/gradle.properties
-            fi
-          else
-            echo "android.newDsl=false" > android/gradle.properties
-          fi
-
-          echo "========================================"
-          echo "Android Gradle properties:"
-          echo "========================================"
-          cat android/gradle.properties
-
       - name: Analyze Flutter project
         run: |
           cd "$PROJECT_DIR"
@@ -177,6 +177,21 @@ jobs:
           cd "$PROJECT_DIR"
           flutter test
 
+      - name: Show Android configuration
+        run: |
+          cd "$PROJECT_DIR"
+
+          echo "Android directory:"
+          find android -maxdepth 3 -type f -print | sort
+
+          echo ""
+          echo "Gradle properties:"
+          cat android/gradle.properties || true
+
+          echo ""
+          echo "Flutter doctor:"
+          flutter doctor -v
+
       - name: Build debug APK
         run: |
           set -e
@@ -184,6 +199,9 @@ jobs:
           cd "$PROJECT_DIR"
 
           export PATH="$HOME/.cargo/bin:$PATH"
+
+          flutter clean
+          flutter pub get
 
           flutter build apk --debug --verbose
 
@@ -198,14 +216,17 @@ jobs:
           flutter build apk --release --verbose
 
       - name: Show generated APKs
+        if: always()
         run: |
           cd "$PROJECT_DIR"
 
-          echo "========================================"
           echo "Generated APK files:"
-          echo "========================================"
 
-          find build/app/outputs -type f -name "*.apk" -print
+          if [ -d build/app/outputs ]; then
+            find build/app/outputs -type f -name "*.apk" -print
+          else
+            echo "No APK output directory found."
+          fi
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
