@@ -1,38 +1,53 @@
-name: Extract and Build Ycash Wallet
+name: Build Ycash Wallet
 
 on:
   workflow_dispatch:
   push:
-    branches: [ main ]
-  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: read
 
 jobs:
-  flutter:
-    name: Build Ycash Wallet
+  build:
+    name: Build Android APK
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Java 17
+      - name: Set up Java
         uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: "17"
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: stable
 
-      - name: Install Flutter dependencies
+      - name: Get dependencies
         run: flutter pub get
 
-      - name: Analyze Flutter project
+      - name: Analyze project
         run: flutter analyze
 
-      - name:
+      - name: Check for Flutter tests
+        run: |
+          if [ -d "test" ]; then
+            flutter test
+          else
+            echo "No test directory found. Skipping tests."
+          fi
+
+      - name: Build debug APK
+        run: flutter build apk --debug
+
+      - name: Build release APK
+        run: flutter build apk --release
+
+    
+      
