@@ -1,4 +1,4 @@
-name: Build Ycash Wallet
+name: Build Android APK
 
 on:
   workflow_dispatch:
@@ -11,8 +11,12 @@ permissions:
 
 jobs:
   build:
-    name: Build Android APK
+    name: Build Ycash Wallet
     runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: phase48
 
     steps:
       - name: Checkout repository
@@ -35,6 +39,34 @@ jobs:
       - name: Analyze project
         run: flutter analyze
 
+      - name: Check for Flutter tests
+        shell: bash
+        run: |
+          if [ -d "test" ] && find test -type f -name "*_test.dart" | grep -q .; then
+            flutter test
+          else
+            echo "No Flutter tests found. Skipping tests."
+          fi
+
+      - name: Build debug APK
+        run: flutter build apk --debug
+
+      - name: Build release APK
+        run: flutter build apk --release
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Ycash-Debug-APK
+          path: phase48/build/app/outputs/flutter-apk/app-debug.apk
+          if-no-files-found: error
+
+      - name: Upload release APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Ycash-Release-APK
+          path: phase48/build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
       - name: Check for Flutter tests
         run: |
           if [ -d "test" ]; then
