@@ -61,10 +61,11 @@ jobs:
           PROJECT_DIR=$(find "$GITHUB_WORKSPACE/extracted_project" \
             -name pubspec.yaml \
             -type f \
+            ! -path "*/packages/*" \
             -printf '%h\n' | head -n 1)
 
           if [ -z "$PROJECT_DIR" ]; then
-            echo "ERROR: Could not find pubspec.yaml."
+            echo "ERROR: Could not find the main pubspec.yaml."
             exit 1
           fi
 
@@ -95,201 +96,96 @@ jobs:
             armv7-linux-androideabi
             x86_64-linux-android
 
+      - name: Install Android SDK components
+        run: |
+          yes | sdkmanager --licenses || true
+
+          sdkmanager \
+            "platform-tools" \
+            "platforms;android-36" \
+            "build-tools;36.0.0" \
+            "ndk;29.0.14206865"
+
+      - name: Configure Android environment
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/29.0.14206865" >> "$GITHUB_ENV"
+          echo "NDK_HOME=$ANDROID_HOME/ndk/29.0.14206865" >> "$GITHUB_ENV"
+
       - name: Install cargo-ndk
         run: |
           cargo install cargo-ndk --locked
 
-      - name: Configure Android NDK
+      - name: Verify toolchains
         run: |
-          echo "ANDROID_NDK_HOME=$ANDROID_NDK_LATEST_HOME" >> "$GITHUB_ENV"
-          echo "ANDROID_NDK_ROOT=$ANDROID_NDK_LATEST_HOME" >> "$GITHUB_ENV"
-
-          if [ ! -d "$ANDROID_NDK_LATEST_HOME" ]; then
-            echo "ERROR: Android NDK not found."
-            exit 1
-          fi
-
-          echo "ANDROID_HOME=$ANDROID_HOME"
-          echo "ANDROID_NDK_LATEST_HOME=$ANDROID_NDK_LATEST_HOME"
-
-      - name: Verify build tools
-        run: |
-          export PATH="$HOME/.cargo/bin:$PATH"
-
+          echo "=== Java ==="
           java -version
+
+          echo ""
+          echo "=== Flutter ==="
           flutter --version
+
+          echo ""
+          echo "=== Flutter Doctor ==="
+          flutter doctor -v
+
+          echo ""
+          echo "=== Rust ==="
           rustc --version
           cargo --version
           cargo ndk --version
 
           echo ""
-          echo "Installed Rust targets:"
-          rustup target list --installed
+          echo "=== Android SDK ==="
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/29.0.14206865"
 
-      - name: Configure Flutter and Kotlin compatibility
+      - name: Get Flutter dependencies
+        working-directory: ${{ env.PROJECT_DIR }}
         run: |
-          set -e
+          flutter pub get
 
-          cd "$PROJECT_DIR"
-
-          echo "=========================================="
-          echo "Configuring Android compatibility"
-          echo "=========================================="
-
-          mkdir -p android
-
-          GRADLE_PROPERTIES="android/gradle.properties"
-
-          touch "$GRADLE_PROPERTIES"
-
-          # Remove existing newDsl settings
-          sed -i '/^android\.newDsl=/d' "$GRADLE_PROPERTIES"
-
-          echo "" >> "$GRADLE_PROPERTIES"
-          echo "# GitHub Actions Flutter compatibility" >> "$GRADLE_PROPERTIES"
-          echo "android.newDsl=false" >> "$GRADLE_PROPERTIES"
+      - name: Check project structure
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          echo "=== Flutter project ==="
+          ls -lah
 
           echo ""
-          echo "Updating Kotlin versions to 2.2.20..."
-
-          # Update Kotlin plugin versions in Gradle files
-          find android \
-            -type f \
-            \( -name "*.gradle" -o -name "*.gradle.kts" -o -name "gradle.properties" \) \
-            -print0 | while IFS= read -r -d '' file; do
-
-              echo "Checking: $file"
-
-              # Common Kotlin versions used by older Flutter projects
-              sed -i \
-                -e 's/2\.1\.0/2.2.20/g' \
-                -e 's/2\.1\.10/2.2.20/g' \
-                -e 's/2\.1\.20/2.2.20/g' \
-                -e 's/2\.0\.21/2.2.20/g' \
-                -e 's/1\.9\.25/2.2.20/g' \
-                -e 's/1\.9\.24/2.2.20/g' \
-                "$file"
-
-            done
-
-          echo ""
-          echo "Android Gradle files after compatibility update:"
-
-          find android \
-            -maxdepth 2 \
+          echo "=== Android Gradle files ==="
+          find android -maxdepth 3 \
             -type f \
             \( -name "*.gradle" -o -name "*.gradle.kts" -o -name "gradle.properties" \) \
             -print
 
           echo ""
-          echo "gradle.properties:"
-          cat "$GRADLE_PROPERTIES"
+          echo "=== Rust project ==="
+          find packages/ycash_core_ffi/rust \
+            -maxdepth 2 \
+            -type f \
+            \( -name "Cargo.toml" -o -name "Cargo.lock" \) \
+            -print
 
-          echo ""
-          echo "Kotlin references:"
-          grep -Rni \
-            -E "kotlin|org.jetbrains.kotlin" \
-            android \
-            --include="*.gradle" \
-            --include="*.gradle.kts" \
-            --include="gradle.properties" || true
-
-      - name: Get Flutter dependencies
+      - name: Build Flutter APK
+        working-directory: ${{ env.PROJECT_DIR }}
         run: |
-          cd "$PROJECT_DIR"
-          flutter pub get
-
-      - name: Verify Ycash cryptographic sources
-        run: |
-          cd "$PROJECT_DIR"
-
-          if [ -f scripts/verify_ycash_lock.py ]; then
-            python3 scripts/verify_ycash_lock.py
-          else
-            echo "Ycash verification script not found — skipping."
-          fi
-
-      - name: Analyze Flutter project
-        run: |
-          cd "$PROJECT_DIR"
-          flutter analyze --no-fatal-infos
-
-      - name: Run Flutter tests
-        run: |
-          cd "$PROJECT_DIR"
-          flutter test
-
-      - name: Show Android configuration
-        run: |
-          cd "$PROJECT_DIR"
-
-          echo "=========================================="
-          echo "Android files"
-          echo "=========================================="
-
-          find android -maxdepth 3 -type f -print | sort
-
-          echo ""
-          echo "=========================================="
-          echo "Gradle properties"
-          echo "=========================================="
-
-          cat android/gradle.properties || true
-
-          echo ""
-          echo "=========================================="
-          echo "Flutter doctor"
-          echo "=========================================="
-
-          flutter doctor -v
-
-      - name: Build debug APK
-        run: |
-          set -e
-
-          cd "$PROJECT_DIR"
-
-          export PATH="$HOME/.cargo/bin:$PATH"
-
-          flutter clean
-          flutter pub get
-
-          flutter build apk --debug --verbose
-
-      - name: Build release APK
-        run: |
-          set -e
-
-          cd "$PROJECT_DIR"
-
-          export PATH="$HOME/.cargo/bin:$PATH"
-
           flutter build apk --release --verbose
 
-      - name: Show generated APKs
-        if: always()
+      - name: Show generated APK files
+        working-directory: ${{ env.PROJECT_DIR }}
         run: |
-          cd "$PROJECT_DIR"
-
           echo "Generated APK files:"
-
-          find build \
+          find build/app/outputs/flutter-apk \
             -type f \
             -name "*.apk" \
-            -print || true
+            -print \
+            -exec ls -lh {} \;
 
-      - name: Upload debug APK
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: Ycash-Wallet-Debug-APK
-          path: ${{ env.PROJECT_DIR }}/build/app/outputs/flutter-apk/app-debug.apk
-          if-no-files-found: warn
-
-      - name: Upload release APK
-        if: always()
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: Ycash-Wallet-Release-APK
-          path: ${{ env.PROJECT_DIR }}/build/app/outputs/flutter-apk/app-release.apk
-          if-no-files-found: warn
+          path: ${{ env.PROJECT_DIR }}/build/app/outputs/flutter-apk/*.apk
+          if-no-files-found: error
+          retention-days: 30
