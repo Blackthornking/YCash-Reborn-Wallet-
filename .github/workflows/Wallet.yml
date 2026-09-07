@@ -23,39 +23,22 @@ jobs:
           echo "Repository contents:"
           ls -la
 
-          if [ ! -f "ycashwallet.zip" ]; then
-            echo "ERROR: ycashwallet.zip was not found in the repository root."
-            exit 1
-          fi
-
-          rm -rf extracted_wallet
-          mkdir -p extracted_wallet
-
-          unzip -q ycashwallet.zip -d extracted_wallet
-
-          echo "Extracted Flutter projects:"
-          find extracted_wallet -type f -name pubspec.yaml -print
-
       - name: Find Flutter project
+        id: flutter_project
         run: |
-          PUBSPEC=$(find extracted_wallet -type f -name pubspec.yaml | head -n 1)
-
-          if [ -z "$PUBSPEC" ]; then
-            echo "ERROR: Could not find pubspec.yaml inside ycashwallet.zip"
-            exit 1
+          if [ -f "pubspec.yaml" ]; then
+            echo "dir=." >> "$GITHUB_OUTPUT"
+          else
+            PROJECT_DIR=$(find . -name pubspec.yaml -not -path "*/.pub-cache/*" -print -quit | xargs dirname)
+            if [ -z "$PROJECT_DIR" ]; then
+              echo "ERROR: Could not find pubspec.yaml"
+              exit 1
+            fi
+            echo "dir=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
           fi
-
-          PROJECT_DIR=$(dirname "$PUBSPEC")
-
-          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-
-          echo "Flutter project found at:"
-          echo "$PROJECT_DIR"
-
-          ls -la "$PROJECT_DIR"
 
       - name: Set up Java 17
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
@@ -64,21 +47,34 @@ jobs:
         uses: subosito/flutter-action@v2
         with:
           channel: stable
-          cache: true
 
       - name: Show tool versions
         run: |
           flutter --version
-          dart --version
           java -version
+          javac -version
 
       - name: Get Flutter dependencies
-        working-directory: ${{ env.PROJECT_DIR }}
+        working-directory: ${{ steps.flutter_project.outputs.dir }}
         run: flutter pub get
 
       - name: Restore Android host if needed
-        working-directory: ${{ env.PROJECT_DIR }}
+        working-directory: ${{ steps.flutter_project.outputs.dir }}
         run: |
           if [ ! -f "android/gradle/wrapper/gradle-wrapper.properties" ]; then
-            echo "Android Gradle wrapper missing."
-            echo "
+            echo "Android host files are missing. Restoring them..."
+            flutter create --platforms=android .
+          else
+            echo "Android host files already exist."
+          fi
+
+      - name: Build Android APK
+        working-directory: ${{ steps.flutter_project.outputs.dir }}
+        run: flutter build apk --release
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ycash-wallet-apk
+          path: ${{ steps.flutter_project.outputs.dir }}/build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
