@@ -115,7 +115,7 @@ jobs:
           echo "Wrapper files:"
           ls -lah android/gradle/wrapper || true
 
-      - name: Fix Android Gradle Plugin and Gradle versions
+      - name: Fix Android Gradle Plugin, Gradle and Kotlin versions
         run: |
           cd "$PROJECT_DIR"
 
@@ -134,6 +134,7 @@ jobs:
 
           AGP_VERSION = "8.11.1"
           GRADLE_VERSION = "8.14"
+          KOTLIN_VERSION = "2.2.20"
 
           files = [
               android / "settings.gradle",
@@ -149,13 +150,20 @@ jobs:
               text = path.read_text()
               original = text
 
-              # Android Gradle Plugin in plugins blocks
+              # ========================================
+              # Android Gradle Plugin
+              # ========================================
+
+              # Kotlin DSL:
+              # id("com.android.application") version "x.x.x"
               text = re.sub(
                   r'(id\(\s*["\']com\.android\.(?:application|library)["\']\s*\)\s*version\s*["\'])[^"\']+',
                   r'\g<1>' + AGP_VERSION,
                   text
               )
 
+              # Groovy DSL:
+              # id "com.android.application" version "x.x.x"
               text = re.sub(
                   r'(id\s+["\']com\.android\.(?:application|library)["\']\s+version\s+["\'])[^"\']+',
                   r'\g<1>' + AGP_VERSION,
@@ -169,9 +177,61 @@ jobs:
                   text
               )
 
+              # ========================================
+              # Kotlin Gradle Plugin
+              # ========================================
+
+              # Kotlin DSL:
+              # id("org.jetbrains.kotlin.android") version "x.x.x"
+              text = re.sub(
+                  r'(id\(\s*["\']org\.jetbrains\.kotlin\.android["\']\s*\)\s*version\s*["\'])[^"\']+',
+                  r'\g<1>' + KOTLIN_VERSION,
+                  text
+              )
+
+              # Groovy DSL:
+              # id "org.jetbrains.kotlin.android" version "x.x.x"
+              text = re.sub(
+                  r'(id\s+["\']org\.jetbrains\.kotlin\.android["\']\s+version\s+["\'])[^"\']+',
+                  r'\g<1>' + KOTLIN_VERSION,
+                  text
+              )
+
+              # Other Kotlin plugin declarations
+              text = re.sub(
+                  r'(id\(\s*["\']org\.jetbrains\.kotlin(?:\.[a-z]+)*["\']\s*\)\s*version\s*["\'])[^"\']+',
+                  r'\g<1>' + KOTLIN_VERSION,
+                  text
+              )
+
+              # Old ext.kotlin_version format
+              text = re.sub(
+                  r'(ext\.kotlin_version\s*=\s*["\'])[^"\']+',
+                  r'\g<1>' + KOTLIN_VERSION,
+                  text
+              )
+
+              # kotlin_version = "x.x.x"
+              text = re.sub(
+                  r'(kotlin_version\s*=\s*["\'])[^"\']+',
+                  r'\g<1>' + KOTLIN_VERSION,
+                  text
+              )
+
+              # Old Kotlin Gradle plugin classpath
+              text = re.sub(
+                  r'(org\.jetbrains\.kotlin:kotlin-gradle-plugin:)[0-9A-Za-z.\-+]+',
+                  r'\g<1>' + KOTLIN_VERSION,
+                  text
+              )
+
               if text != original:
                   path.write_text(text)
                   print(f"Updated: {path}")
+
+          # ========================================
+          # Gradle Wrapper
+          # ========================================
 
           wrapper = android / "gradle" / "wrapper" / "gradle-wrapper.properties"
 
@@ -194,6 +254,7 @@ jobs:
           print("========================================")
           print(f"Android Gradle Plugin: {AGP_VERSION}")
           print(f"Gradle: {GRADLE_VERSION}")
+          print(f"Kotlin: {KOTLIN_VERSION}")
           print("========================================")
           PY
 
@@ -204,7 +265,7 @@ jobs:
           echo
           echo "Android plugin references:"
           grep -R \
-            "com.android.tools.build:gradle\|com.android.application\|com.android.library" \
+            "com.android.tools.build:gradle\|com.android.application\|com.android.library\|org.jetbrains.kotlin\|kotlin_version" \
             android \
             --include="*.gradle" \
             --include="*.gradle.kts" \
