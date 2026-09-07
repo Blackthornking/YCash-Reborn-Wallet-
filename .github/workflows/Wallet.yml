@@ -1,0 +1,117 @@
+name: Build YCash Wallet Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-android:
+    name: Build Flutter Android APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Show repository contents
+        run: |
+          echo "Repository root:"
+          ls -la
+          echo ""
+          echo "Searching for ZIP files:"
+          find . -maxdepth 3 -type f -iname "*.zip" -print
+
+      - name: Find YCash Wallet ZIP
+        id: wallet_zip
+        shell: bash
+        run: |
+          ZIP_FILE=$(find . -maxdepth 3 -type f -iname "*ycashwallet*.zip" | head -n 1)
+
+          if [ -z "$ZIP_FILE" ]; then
+            echo "ERROR: Could not find a YCash Wallet ZIP."
+            exit 1
+          fi
+
+          echo "Found: $ZIP_FILE"
+          echo "zip_file=$ZIP_FILE" >> "$GITHUB_OUTPUT"
+
+      - name: Extract YCash Wallet project
+        shell: bash
+        run: |
+          rm -rf extracted_wallet
+          mkdir -p extracted_wallet
+
+          unzip -q "${{ steps.wallet_zip.outputs.zip_file }}" -d extracted_wallet
+
+          echo "Extracted project structure:"
+          find extracted_wallet -maxdepth 3 -type f | head -100
+
+      - name: Find Flutter project
+        id: flutter_project
+        shell: bash
+        run: |
+          FLUTTER_DIR=$(find extracted_wallet \
+            -type f \
+            -name "pubspec.yaml" \
+            -printf '%h\n' | head -n 1)
+
+          if [ -z "$FLUTTER_DIR" ]; then
+            echo "ERROR: No Flutter pubspec.yaml found."
+            exit 1
+          fi
+
+          echo "Flutter project: $FLUTTER_DIR"
+          echo "flutter_dir=$FLUTTER_DIR" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Show Flutter version
+        run: flutter --version
+
+      - name: Enable Android platform
+        working-directory: ${{ steps.flutter_project.outputs.flutter_dir }}
+        run: |
+          flutter config --enable-android
+          flutter doctor -v
+
+      - name: Get Flutter dependencies
+        working-directory: ${{ steps.flutter_project.outputs.flutter_dir }}
+        run: flutter pub get
+
+      - name: Analyze Flutter project
+        working-directory: ${{ steps.flutter_project.outputs.flutter_dir }}
+        run: flutter analyze
+
+      - name: Build Android APK
+        working-directory: ${{ steps.flutter_project.outputs.flutter_dir }}
+        run: flutter build apk --release
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ycash-wallet-release-apk
+          path: |
+            ${{ steps.flutter_project.outputs.flutter_dir }}/build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Complete build
+        run: |
+          echo "======================================"
+          echo "YCash Wallet Android APK built!"
+          echo "======================================"
