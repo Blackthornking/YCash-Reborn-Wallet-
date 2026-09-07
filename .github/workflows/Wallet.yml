@@ -1,3 +1,87 @@
+name: Build Android APK
+
+on:
+  workflow_dispatch:
+
+  push:
+    branches:
+      - main
+
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Show repository contents
+        run: |
+          echo "Repository contents:"
+          ls -lah
+          echo ""
+          echo "ZIP files:"
+          find . -maxdepth 2 -type f -iname "*.zip" -print
+
+      - name: Extract project ZIP
+        run: |
+          set -e
+
+          ZIP_FILE=$(find . -maxdepth 2 -type f -iname "*.zip" | head -n 1)
+
+          if [ -z "$ZIP_FILE" ]; then
+            echo "ERROR: No ZIP file found."
+            exit 1
+          fi
+
+          echo "Using ZIP file: $ZIP_FILE"
+
+          rm -rf extracted_project
+          mkdir -p extracted_project
+
+          unzip -q "$ZIP_FILE" -d extracted_project
+
+          echo "Extracted contents:"
+          find extracted_project -maxdepth 3 -type f -name "pubspec.yaml" -o -name "settings.gradle" -o -name "settings.gradle.kts"
+
+      - name: Locate Flutter project
+        run: |
+          set -e
+
+          PROJECT_DIR=$(find "$GITHUB_WORKSPACE/extracted_project" \
+            -name pubspec.yaml \
+            -type f \
+            -printf '%h\n' | head -n 1)
+
+          if [ -z "$PROJECT_DIR" ]; then
+            echo "ERROR: Could not find pubspec.yaml."
+            exit 1
+          fi
+
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+
+          echo "Flutter project found at:"
+          echo "$PROJECT_DIR"
+
+          ls -lah "$PROJECT_DIR"
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -12,24 +96,37 @@
 
       - name: Configure Android NDK for Rust
         run: |
-          echo "ANDROID_NDK_HOME=$ANDROID_NDK_LATEST_HOME" >> $GITHUB_ENV
-          echo "ANDROID_NDK_ROOT=$ANDROID_NDK_LATEST_HOME" >> $GITHUB_ENV
+          echo "ANDROID_NDK_HOME=$ANDROID_NDK_LATEST_HOME" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=$ANDROID_NDK_LATEST_HOME" >> "$GITHUB_ENV"
 
-          echo "ANDROID_NDK_HOME=$ANDROID_NDK_LATEST_HOME"
-          echo "ANDROID_NDK_ROOT=$ANDROID_NDK_LATEST_HOME"
-
-      - name: Verify Rust and Android setup
-        run: |
-          export PATH="$HOME/.cargo/bin:$PATH"
-
-          rustc --version
-          cargo --version
-          cargo ndk --version
+          echo "Android SDK:"
+          echo "$ANDROID_HOME"
 
           echo "Android NDK:"
           echo "$ANDROID_NDK_LATEST_HOME"
 
-          test -d "$ANDROID_NDK_LATEST_HOME"
+          if [ ! -d "$ANDROID_NDK_LATEST_HOME" ]; then
+            echo "ERROR: Android NDK not found."
+            exit 1
+          fi
+
+      - name: Verify build tools
+        run: |
+          export PATH="$HOME/.cargo/bin:$PATH"
+
+          java -version
+          flutter --version
+          rustc --version
+          cargo --version
+          cargo ndk --version
+
+          echo "Installed Rust targets:"
+          rustup target list --installed
+
+      - name: Get Flutter dependencies
+        run: |
+          cd "$PROJECT_DIR"
+          flutter pub get
 
       - name: Verify Ycash cryptographic sources
         run: |
