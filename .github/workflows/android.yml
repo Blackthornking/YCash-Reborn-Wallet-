@@ -1,4 +1,4 @@
-name: Build Native YCash Core
+name: Compile and Test Native YCash Core
 
 on:
   workflow_dispatch:
@@ -14,13 +14,62 @@ jobs:
     name: Compile and Test Native YCash Core
     runs-on: ubuntu-latest
 
-    defaults:
-      run:
-        working-directory: phase48/ycash_core
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Show repository contents
+        run: |
+          echo "Repository root:"
+          ls -la
+
+      - name: Find wallet ZIP
+        run: |
+          set -euo pipefail
+
+          ZIP_FILE=$(find . -maxdepth 2 -type f \( -iname "*.zip" \) | head -n 1)
+
+          if [ -z "$ZIP_FILE" ]; then
+            echo "ERROR: No ZIP file found."
+            exit 1
+          fi
+
+          echo "Found ZIP:"
+          echo "$ZIP_FILE"
+
+          echo "ZIP_FILE=$ZIP_FILE" >> "$GITHUB_ENV"
+
+      - name: Extract YCash Wallet project
+        run: |
+          set -euo pipefail
+
+          mkdir -p wallet_source
+
+          unzip -q "$ZIP_FILE" -d wallet_source
+
+          echo "Extracted project structure:"
+          find wallet_source -maxdepth 4 -type f | head -100
+
+      - name: Find native YCash core
+        run: |
+          set -euo pipefail
+
+          CARGO_TOML=$(find wallet_source -type f -path "*/ycash_core/Cargo.toml" | head -n 1)
+
+          if [ -z "$CARGO_TOML" ]; then
+            echo "ERROR: ycash_core/Cargo.toml was not found after extraction."
+            echo ""
+            echo "Available extracted files:"
+            find wallet_source -maxdepth 5 -type f | head -200
+            exit 1
+          fi
+
+          YCORE_DIR=$(dirname "$CARGO_TOML")
+
+          echo "Found native core:"
+          echo "$YCORE_DIR"
+
+          echo "YCORE_DIR=$YCORE_DIR" >> "$GITHUB_ENV"
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -30,17 +79,21 @@ jobs:
           rustc --version
           cargo --version
 
-      - name: Verify YCash upstream sources
+      - name: Show native core structure
         run: |
-          echo "Checking vendored dependencies..."
+          echo "Native core:"
+          ls -la "$YCORE_DIR"
 
-          test -d ../vendor/librustzcash-nu61
-          test -d ../vendor/sapling-crypto-ycash
-
-          echo "YCash upstream sources found."
+          echo ""
+          echo "Cargo.toml:"
+          cat "$YCORE_DIR/Cargo.toml"
 
       - name: Cargo check
-        run: cargo check --all-features
+        working-directory: ${{ env.YCORE_DIR }}
+        run: |
+          cargo check --all-features
 
       - name: Run native tests
-        run: cargo test --all-features
+        working-directory: ${{ env.YCORE_DIR }}
+        run: |
+          cargo test --all-features
