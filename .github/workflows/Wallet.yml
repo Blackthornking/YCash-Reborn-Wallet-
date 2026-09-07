@@ -18,56 +18,48 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-
       - name: Checkout repository
         uses: actions/checkout@v4
-
 
       - name: Show repository contents
         run: |
           echo "Repository contents:"
           ls -lah
 
-
       - name: Find and extract wallet ZIP
         run: |
-          ZIP_FILE=$(find . -maxdepth 2 -type f \( -iname "*.zip" \) | head -n 1)
+          ZIP_FILE=$(find . -maxdepth 2 -type f -iname "*.zip" | head -n 1)
 
           if [ -z "$ZIP_FILE" ]; then
-            echo "ERROR: No ZIP file found in repository"
+            echo "ERROR: No ZIP file found"
             exit 1
           fi
 
-          echo "Found ZIP file:"
-          echo "$ZIP_FILE"
+          echo "Found ZIP: $ZIP_FILE"
 
           mkdir -p extracted_project
-
           unzip -q "$ZIP_FILE" -d extracted_project
 
-          echo "Extracted contents:"
+          echo "Extracted files:"
           find extracted_project -maxdepth 3 -type f | head -100
-
 
       - name: Find Flutter project
         run: |
           PUBSPEC=$(find extracted_project -name pubspec.yaml -type f | head -n 1)
 
           if [ -z "$PUBSPEC" ]; then
-            echo "ERROR: Could not find pubspec.yaml"
+            echo "ERROR: pubspec.yaml not found"
             exit 1
           fi
 
           PROJECT_DIR=$(dirname "$PUBSPEC")
 
-          echo "Flutter project found at:"
-          echo "$PROJECT_DIR"
-
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
-          echo "Project contents:"
-          ls -lah "$PROJECT_DIR"
+          echo "Flutter project:"
+          echo "$PROJECT_DIR"
 
+          ls -lah "$PROJECT_DIR"
 
       - name: Set up Java 17
         uses: actions/setup-java@v5
@@ -75,13 +67,11 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: stable
           cache: true
-
 
       - name: Show tool versions
         run: |
@@ -89,19 +79,50 @@ jobs:
           dart --version
           java -version
 
+      - name: Get Flutter dependencies
+        run: |
+          cd "$PROJECT_DIR"
+          flutter pub get
 
-      - name: Verify Flutter project layout
+      - name: Verify project layout
         run: |
           cd "$PROJECT_DIR"
 
-          echo "Checking project files..."
-
           test -f pubspec.yaml
-          test -d android
 
           echo "Project structure:"
-          find . -maxdepth 3 -type f | head -100
+          find . -maxdepth 2 -type f | sort
 
+      - name: Generate Android Gradle wrapper if missing
+        run: |
+          cd "$PROJECT_DIR"
+
+          if [ ! -d android ]; then
+            echo "Android folder missing. Creating Android platform..."
+            flutter create --platforms=android .
+          fi
+
+          if [ ! -f android/gradlew ]; then
+            echo "Gradle wrapper missing. Regenerating Android platform..."
+
+            cp -r android /tmp/android-backup || true
+
+            flutter create --platforms=android .
+
+            echo "Android platform generated."
+          fi
+
+          chmod +x android/gradlew
+
+          echo "Android files:"
+          ls -lah android
+          ls -lah android/gradle/wrapper
+
+      - name: Verify Gradle wrapper
+        run: |
+          cd "$PROJECT_DIR/android"
+
+          ./gradlew --version
 
       - name: Verify Ycash cryptographic sources
         run: |
@@ -110,65 +131,35 @@ jobs:
           if [ -f scripts/verify_ycash_lock.py ]; then
             python3 scripts/verify_ycash_lock.py
           else
-            echo "verify_ycash_lock.py not found — skipping verification"
+            echo "Ycash verification script not found — skipping."
           fi
-
-
-      - name: Get Flutter dependencies
-        run: |
-          cd "$PROJECT_DIR"
-          flutter pub get
-
-
-      - name: Ensure Gradle wrapper is executable
-        run: |
-          cd "$PROJECT_DIR"
-
-          if [ -f android/gradlew ]; then
-            chmod +x android/gradlew
-          else
-            echo "ERROR: android/gradlew not found"
-            exit 1
-          fi
-
-
-      - name: Verify Gradle version
-        run: |
-          cd "$PROJECT_DIR/android"
-          ./gradlew --version
-
 
       - name: Analyze Flutter project
         run: |
           cd "$PROJECT_DIR"
           flutter analyze --no-fatal-infos
 
-
       - name: Run Flutter tests
         run: |
           cd "$PROJECT_DIR"
           flutter test
-
 
       - name: Build debug APK
         run: |
           cd "$PROJECT_DIR"
           flutter build apk --debug
 
-
       - name: Build release APK
         run: |
           cd "$PROJECT_DIR"
           flutter build apk --release
 
-
       - name: Show generated APKs
         run: |
           cd "$PROJECT_DIR"
 
-          echo "APK files:"
+          echo "Generated APK files:"
           find build/app/outputs -type f -name "*.apk" -print
-
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
@@ -176,7 +167,6 @@ jobs:
           name: Ycash-Wallet-Debug-APK
           path: ${{ env.PROJECT_DIR }}/build/app/outputs/flutter-apk/app-debug.apk
           if-no-files-found: error
-
 
       - name: Upload release APK
         uses: actions/upload-artifact@v4
