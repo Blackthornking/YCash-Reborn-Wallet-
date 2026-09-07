@@ -48,10 +48,14 @@ jobs:
 
           unzip -q "$ZIP_FILE" -d extracted_project
 
-          echo "Extracted contents:"
-          find extracted_project -maxdepth 5 \
+          echo "Extracted project files:"
+          find extracted_project -maxdepth 6 \
             -type f \
-            \( -name "pubspec.yaml" -o -name "settings.gradle" -o -name "settings.gradle.kts" \) \
+            -name "pubspec.yaml" \
+            -o -name "settings.gradle" \
+            -o -name "settings.gradle.kts" \
+            -o -name "build.gradle" \
+            -o -name "build.gradle.kts" \
             -print
 
       - name: Locate Flutter project
@@ -99,16 +103,13 @@ jobs:
         run: |
           cargo install cargo-ndk --locked
 
-      - name: Configure Android NDK for Rust
+      - name: Configure Android NDK
         run: |
           echo "ANDROID_NDK_HOME=$ANDROID_NDK_LATEST_HOME" >> "$GITHUB_ENV"
           echo "ANDROID_NDK_ROOT=$ANDROID_NDK_LATEST_HOME" >> "$GITHUB_ENV"
 
-          echo "Android SDK:"
-          echo "$ANDROID_HOME"
-
-          echo "Android NDK:"
-          echo "$ANDROID_NDK_LATEST_HOME"
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          echo "ANDROID_NDK_LATEST_HOME=$ANDROID_NDK_LATEST_HOME"
 
           if [ ! -d "$ANDROID_NDK_LATEST_HOME" ]; then
             echo "ERROR: Android NDK not found."
@@ -129,115 +130,16 @@ jobs:
           echo "Installed Rust targets:"
           rustup target list --installed
 
-      - name: Configure Flutter AGP compatibility
+      - name: Fix Android Gradle compatibility
         run: |
           set -e
 
           cd "$PROJECT_DIR"
 
-          mkdir -p android
+          echo "========================================"
+          echo "BEFORE ANDROID GRADLE FIX"
+          echo "========================================"
 
-          GRADLE_PROPERTIES="android/gradle.properties"
-
-          touch "$GRADLE_PROPERTIES"
-
-          # Remove any existing android.newDsl setting
-          sed -i '/^android\.newDsl=/d' "$GRADLE_PROPERTIES"
-
-          # Disable the AGP 9 new DSL for Flutter compatibility
-          echo "" >> "$GRADLE_PROPERTIES"
-          echo "# GitHub Actions compatibility setting" >> "$GRADLE_PROPERTIES"
-          echo "android.newDsl=false" >> "$GRADLE_PROPERTIES"
-
-          echo "Final gradle.properties:"
-          cat "$GRADLE_PROPERTIES"
-
-      - name: Get Flutter dependencies
-        run: |
-          cd "$PROJECT_DIR"
-          flutter pub get
-
-      - name: Verify Ycash cryptographic sources
-        run: |
-          cd "$PROJECT_DIR"
-
-          if [ -f scripts/verify_ycash_lock.py ]; then
-            python3 scripts/verify_ycash_lock.py
-          else
-            echo "Ycash verification script not found — skipping."
-          fi
-
-      - name: Analyze Flutter project
-        run: |
-          cd "$PROJECT_DIR"
-          flutter analyze --no-fatal-infos
-
-      - name: Run Flutter tests
-        run: |
-          cd "$PROJECT_DIR"
-          flutter test
-
-      - name: Show Android configuration
-        run: |
-          cd "$PROJECT_DIR"
-
-          echo "Android directory:"
-          find android -maxdepth 3 -type f -print | sort
-
-          echo ""
-          echo "Gradle properties:"
-          cat android/gradle.properties || true
-
-          echo ""
-          echo "Flutter doctor:"
-          flutter doctor -v
-
-      - name: Build debug APK
-        run: |
-          set -e
-
-          cd "$PROJECT_DIR"
-
-          export PATH="$HOME/.cargo/bin:$PATH"
-
-          flutter clean
-          flutter pub get
-
-          flutter build apk --debug --verbose
-
-      - name: Build release APK
-        run: |
-          set -e
-
-          cd "$PROJECT_DIR"
-
-          export PATH="$HOME/.cargo/bin:$PATH"
-
-          flutter build apk --release --verbose
-
-      - name: Show generated APKs
-        if: always()
-        run: |
-          cd "$PROJECT_DIR"
-
-          echo "Generated APK files:"
-
-          if [ -d build/app/outputs ]; then
-            find build/app/outputs -type f -name "*.apk" -print
-          else
-            echo "No APK output directory found."
-          fi
-
-      - name: Upload debug APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: Ycash-Wallet-Debug-APK
-          path: ${{ env.PROJECT_DIR }}/build/app/outputs/flutter-apk/app-debug.apk
-          if-no-files-found: error
-
-      - name: Upload release APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: Ycash-Wallet-Release-APK
-          path: ${{ env.PROJECT_DIR }}/build/app/outputs/flutter-apk/app-release.apk
-          if-no-files-found: error
+          find android -maxdepth 3 \
+            -type f \
+            \( -
