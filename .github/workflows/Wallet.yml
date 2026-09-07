@@ -104,10 +104,7 @@ jobs:
 
           if [ ! -f android/gradlew ]; then
             echo "Gradle wrapper missing. Regenerating Android platform..."
-
             flutter create --platforms=android .
-
-            echo "Android platform generated."
           fi
 
           chmod +x android/gradlew
@@ -115,16 +112,15 @@ jobs:
           echo "Android files:"
           ls -lah android
 
-          if [ -d android/gradle/wrapper ]; then
-            ls -lah android/gradle/wrapper
-          fi
+          echo "Wrapper files:"
+          ls -lah android/gradle/wrapper || true
 
       - name: Fix Android Gradle Plugin and Gradle versions
         run: |
           cd "$PROJECT_DIR"
 
           echo "========================================"
-          echo "Applying Flutter/AGP compatibility fix"
+          echo "Applying Flutter compatibility fixes"
           echo "========================================"
 
           python3 <<'PY'
@@ -136,7 +132,8 @@ jobs:
           if not android.exists():
               raise SystemExit("ERROR: Android directory not found")
 
-          agp_version = "8.11.1"
+          AGP_VERSION = "8.11.1"
+          GRADLE_VERSION = "8.14"
 
           files = [
               android / "settings.gradle",
@@ -152,77 +149,70 @@ jobs:
               text = path.read_text()
               original = text
 
-              # plugins block:
-              # id "com.android.application" version "x.x.x"
-              text = re.sub(
-                  r'(id\s*[("\']com\.android\.(?:application|library)[)"\']\s*version\s*[("\'])[^"\']+',
-                  r'\g<1>' + agp_version,
-                  text
-              )
-
-              # Kotlin style:
-              # id("com.android.application") version "x.x.x"
+              # Android Gradle Plugin in plugins blocks
               text = re.sub(
                   r'(id\(\s*["\']com\.android\.(?:application|library)["\']\s*\)\s*version\s*["\'])[^"\']+',
-                  r'\g<1>' + agp_version,
+                  r'\g<1>' + AGP_VERSION,
                   text
               )
 
-              # Old classpath style:
-              # classpath "com.android.tools.build:gradle:x.x.x"
+              text = re.sub(
+                  r'(id\s+["\']com\.android\.(?:application|library)["\']\s+version\s+["\'])[^"\']+',
+                  r'\g<1>' + AGP_VERSION,
+                  text
+              )
+
+              # Old buildscript classpath format
               text = re.sub(
                   r'(com\.android\.tools\.build:gradle:)[0-9A-Za-z.\-+]+',
-                  r'\g<1>' + agp_version,
+                  r'\g<1>' + AGP_VERSION,
                   text
               )
 
               if text != original:
                   path.write_text(text)
-                  print(f"Updated AGP in: {path}")
+                  print(f"Updated: {path}")
 
           wrapper = android / "gradle" / "wrapper" / "gradle-wrapper.properties"
 
-          if wrapper.exists():
-              text = wrapper.read_text()
-
-              text = re.sub(
-                  r'distributionUrl=.*gradle-[^/]+-(?:bin|all)\.zip',
-                  'distributionUrl=https\\://services.gradle.org/distributions/gradle-8.13-bin.zip',
-                  text
+          if not wrapper.exists():
+              raise SystemExit(
+                  "ERROR: gradle-wrapper.properties was not found"
               )
 
-              wrapper.write_text(text)
-              print(f"Updated Gradle wrapper: {wrapper}")
-          else:
-              print("WARNING: gradle-wrapper.properties not found")
+          text = wrapper.read_text()
+
+          text = re.sub(
+              r'distributionUrl=.*gradle-[0-9.]+-(?:bin|all)\.zip',
+              f'distributionUrl=https\\://services.gradle.org/distributions/gradle-{GRADLE_VERSION}-bin.zip',
+              text
+          )
+
+          wrapper.write_text(text)
+
+          print()
+          print("========================================")
+          print(f"Android Gradle Plugin: {AGP_VERSION}")
+          print(f"Gradle: {GRADLE_VERSION}")
+          print("========================================")
           PY
 
           echo
-          echo "Android Gradle configuration:"
-          echo "----------------------------------------"
-
-          find android \
-            -maxdepth 2 \
-            \( -name "settings.gradle" -o -name "settings.gradle.kts" -o -name "build.gradle" -o -name "build.gradle.kts" \) \
-            -type f \
-            -print
+          echo "Final Gradle wrapper:"
+          cat android/gradle/wrapper/gradle-wrapper.properties
 
           echo
-          echo "AGP references:"
-          grep -R "com.android.tools.build:gradle\|com.android.application\|com.android.library" \
+          echo "Android plugin references:"
+          grep -R \
+            "com.android.tools.build:gradle\|com.android.application\|com.android.library" \
             android \
             --include="*.gradle" \
-            --include="*.kts" \
+            --include="*.gradle.kts" \
             || true
-
-          echo
-          echo "Gradle wrapper:"
-          cat android/gradle/wrapper/gradle-wrapper.properties || true
 
       - name: Verify Gradle wrapper
         run: |
           cd "$PROJECT_DIR/android"
-
           ./gradlew --version
 
       - name: Verify Ycash cryptographic sources
@@ -248,13 +238,11 @@ jobs:
       - name: Build debug APK
         run: |
           cd "$PROJECT_DIR"
-
           flutter build apk --debug
 
       - name: Build release APK
         run: |
           cd "$PROJECT_DIR"
-
           flutter build apk --release
 
       - name: Show generated APKs
@@ -262,11 +250,7 @@ jobs:
           cd "$PROJECT_DIR"
 
           echo "Generated APK files:"
-
-          find build/app/outputs \
-            -type f \
-            -name "*.apk" \
-            -print
+          find build/app/outputs -type f -name "*.apk" -print
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
