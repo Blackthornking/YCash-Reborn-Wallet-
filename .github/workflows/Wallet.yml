@@ -105,8 +105,6 @@ jobs:
           if [ ! -f android/gradlew ]; then
             echo "Gradle wrapper missing. Regenerating Android platform..."
 
-            cp -r android /tmp/android-backup || true
-
             flutter create --platforms=android .
 
             echo "Android platform generated."
@@ -116,7 +114,110 @@ jobs:
 
           echo "Android files:"
           ls -lah android
-          ls -lah android/gradle/wrapper
+
+          if [ -d android/gradle/wrapper ]; then
+            ls -lah android/gradle/wrapper
+          fi
+
+      - name: Fix Android Gradle Plugin and Gradle versions
+        run: |
+          cd "$PROJECT_DIR"
+
+          echo "========================================"
+          echo "Applying Flutter/AGP compatibility fix"
+          echo "========================================"
+
+          python3 <<'PY'
+          from pathlib import Path
+          import re
+
+          android = Path("android")
+
+          if not android.exists():
+              raise SystemExit("ERROR: Android directory not found")
+
+          agp_version = "8.11.1"
+
+          files = [
+              android / "settings.gradle",
+              android / "settings.gradle.kts",
+              android / "build.gradle",
+              android / "build.gradle.kts",
+          ]
+
+          for path in files:
+              if not path.exists():
+                  continue
+
+              text = path.read_text()
+              original = text
+
+              # plugins block:
+              # id "com.android.application" version "x.x.x"
+              text = re.sub(
+                  r'(id\s*[("\']com\.android\.(?:application|library)[)"\']\s*version\s*[("\'])[^"\']+',
+                  r'\g<1>' + agp_version,
+                  text
+              )
+
+              # Kotlin style:
+              # id("com.android.application") version "x.x.x"
+              text = re.sub(
+                  r'(id\(\s*["\']com\.android\.(?:application|library)["\']\s*\)\s*version\s*["\'])[^"\']+',
+                  r'\g<1>' + agp_version,
+                  text
+              )
+
+              # Old classpath style:
+              # classpath "com.android.tools.build:gradle:x.x.x"
+              text = re.sub(
+                  r'(com\.android\.tools\.build:gradle:)[0-9A-Za-z.\-+]+',
+                  r'\g<1>' + agp_version,
+                  text
+              )
+
+              if text != original:
+                  path.write_text(text)
+                  print(f"Updated AGP in: {path}")
+
+          wrapper = android / "gradle" / "wrapper" / "gradle-wrapper.properties"
+
+          if wrapper.exists():
+              text = wrapper.read_text()
+
+              text = re.sub(
+                  r'distributionUrl=.*gradle-[^/]+-(?:bin|all)\.zip',
+                  'distributionUrl=https\\://services.gradle.org/distributions/gradle-8.13-bin.zip',
+                  text
+              )
+
+              wrapper.write_text(text)
+              print(f"Updated Gradle wrapper: {wrapper}")
+          else:
+              print("WARNING: gradle-wrapper.properties not found")
+          PY
+
+          echo
+          echo "Android Gradle configuration:"
+          echo "----------------------------------------"
+
+          find android \
+            -maxdepth 2 \
+            \( -name "settings.gradle" -o -name "settings.gradle.kts" -o -name "build.gradle" -o -name "build.gradle.kts" \) \
+            -type f \
+            -print
+
+          echo
+          echo "AGP references:"
+          grep -R "com.android.tools.build:gradle\|com.android.application\|com.android.library" \
+            android \
+            --include="*.gradle" \
+            --include="*.kts" \
+            || true
+
+          echo
+          echo "Gradle wrapper:"
+          cat android/gradle/wrapper/gradle-wrapper.properties || true
 
       - name: Verify Gradle wrapper
         run: |
@@ -147,11 +248,13 @@ jobs:
       - name: Build debug APK
         run: |
           cd "$PROJECT_DIR"
+
           flutter build apk --debug
 
       - name: Build release APK
         run: |
           cd "$PROJECT_DIR"
+
           flutter build apk --release
 
       - name: Show generated APKs
@@ -159,7 +262,11 @@ jobs:
           cd "$PROJECT_DIR"
 
           echo "Generated APK files:"
-          find build/app/outputs -type f -name "*.apk" -print
+
+          find build/app/outputs \
+            -type f \
+            -name "*.apk" \
+            -print
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
