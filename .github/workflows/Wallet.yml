@@ -189,6 +189,28 @@ jobs:
             \( -name "Cargo.toml" -o -name "Cargo.lock" \) \
             -print
 
+      - name: Configure AGP 9 compatibility
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          set -e
+
+          GRADLE_PROPERTIES="android/gradle.properties"
+
+          touch "$GRADLE_PROPERTIES"
+
+          echo "=== Current gradle.properties ==="
+          cat "$GRADLE_PROPERTIES"
+
+          if grep -q '^android.newDsl=' "$GRADLE_PROPERTIES"; then
+            sed -i 's/^android\.newDsl=.*/android.newDsl=false/' "$GRADLE_PROPERTIES"
+          else
+            echo "android.newDsl=false" >> "$GRADLE_PROPERTIES"
+          fi
+
+          echo ""
+          echo "=== Updated gradle.properties ==="
+          cat "$GRADLE_PROPERTIES"
+
       - name: Build Flutter APK
         working-directory: ${{ env.PROJECT_DIR }}
         run: |
