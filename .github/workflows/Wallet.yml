@@ -28,13 +28,13 @@ jobs:
 
           echo ""
           echo "ZIP files:"
-          find . -maxdepth 2 -type f -iname "*.zip" -print
+          find . -maxdepth 3 -type f -iname "*.zip" -print
 
       - name: Extract project ZIP
         run: |
           set -e
 
-          ZIP_FILE=$(find . -maxdepth 2 -type f -iname "*.zip" | head -n 1)
+          ZIP_FILE=$(find . -maxdepth 3 -type f -iname "*.zip" | head -n 1)
 
           if [ -z "$ZIP_FILE" ]; then
             echo "ERROR: No ZIP file found."
@@ -48,14 +48,11 @@ jobs:
 
           unzip -q "$ZIP_FILE" -d extracted_project
 
-          echo "Extracted project files:"
-          find extracted_project -maxdepth 6 \
+          echo ""
+          echo "Looking for Flutter projects:"
+          find extracted_project \
             -type f \
-            -name "pubspec.yaml" \
-            -o -name "settings.gradle" \
-            -o -name "settings.gradle.kts" \
-            -o -name "build.gradle" \
-            -o -name "build.gradle.kts" \
+            -name "pubspec.yaml" \
             -print
 
       - name: Locate Flutter project
@@ -63,24 +60,34 @@ jobs:
           set -e
 
           PROJECT_DIR=$(find "$GITHUB_WORKSPACE/extracted_project" \
-            -name pubspec.yaml \
             -type f \
-            -printf '%h\n' | head -n 1)
+            -name "pubspec.yaml" \
+            -printf '%h\n' | \
+            grep '/phase48$' | \
+            head -n 1 || true)
 
           if [ -z "$PROJECT_DIR" ]; then
-            echo "ERROR: Could not find pubspec.yaml."
+            PROJECT_DIR=$(find "$GITHUB_WORKSPACE/extracted_project" \
+              -type f \
+              -name "pubspec.yaml" \
+              -printf '%h\n' | \
+              head -n 1)
+          fi
+
+          if [ -z "$PROJECT_DIR" ]; then
+            echo "ERROR: Could not find Flutter pubspec.yaml."
             exit 1
           fi
 
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
-          echo "Flutter project found at:"
+          echo "Flutter project found:"
           echo "$PROJECT_DIR"
 
           ls -lah "$PROJECT_DIR"
 
-      - name: Set up Java
-        uses: actions/setup-java@v4
+      - name: Set up Java 17
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
@@ -90,6 +97,181 @@ jobs:
         with:
           channel: stable
           cache: true
+
+      - name: Show tool versions
+        run: |
+          java -version
+          flutter --version
+          dart --version
+
+      - name: Verify Android project files
+        run: |
+          set -e
+          cd "$PROJECT_DIR"
+
+          test -f pubspec.yaml
+          test -f android/settings.gradle.kts
+          test -f android/build.gradle.kts
+          test -f android/app/build.gradle.kts
+
+          echo "Android project verified."
+
+      - name: Remove AGP 9 new DSL setting
+        run: |
+          set -e
+          cd "$PROJECT_DIR"
+
+          touch android/gradle.properties
+
+          # Remove any old compatibility experiments.
+          sed -i '/^android\.newDsl=/d' android/gradle.properties
+
+          echo "Final gradle.properties:"
+          cat android/gradle.properties
+
+      - name: Pin Android Gradle Plugin and Kotlin
+        run: |
+          set -e
+          cd "$PROJECT_DIR"
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          settings = Path("android/settings.gradle.kts")
+
+          text = settings.read_text()
+
+          text, agp_count = re.subn(
+              r'id\("com\.android\.application"\) version "[^"]+" apply false',
+              'id("com.android.application") version "8.11.1" apply false',
+              text,
+          )
+
+          text, kotlin_count = re.subn(
+              r'id\("org\.jetbrains\.kotlin\.android"\) version "[^"]+" apply false',
+              'id("org.jetbrains.kotlin.android") version "2.1.0" apply false',
+              text,
+          )
+
+          if agp_count != 1:
+              raise SystemExit(
+                  f"ERROR: Expected exactly one AGP declaration, found {agp_count}"
+              )
+
+          if kotlin_count != 1:
+              raise SystemExit(
+                  f"ERROR: Expected exactly one Kotlin declaration, found {kotlin_count}"
+              )
+
+          settings.write_text(text)
+          PY
+
+          echo "Pinned versions:"
+          grep -F 'com.android.application' android/settings.gradle.kts
+          grep -F 'org.jetbrains.kotlin.android' android/settings.gradle.kts
+
+      - name: Create Android local.properties
+        run: |
+          set -e
+          cd "$PROJECT_DIR"
+
+          FLUTTER_BIN="$(readlink -f "$(command -v flutter)")"
+          FLUTTER_SDK="$(dirname "$(dirname "$FLUTTER_BIN")")"
+
+          printf 'flutter.sdk=%s\n' "$FLUTTER_SDK" > android/local.properties
+
+          echo "Flutter SDK:"
+          echo "$FLUTTER_SDK"
+
+          echo ""
+          echo "local.properties:"
+          cat android/local.properties
+
+      - name: Generate Gradle 8.14 wrapper
+        run: |
+          set -e
+          cd "$PROJECT_DIR"
+
+          rm -rf /tmp/gradle-8.14
+          rm -f /tmp/gradle-8.14-bin.zip
+
+          curl --fail \
+            --location \
+            --retry 3 \
+            --output /tmp/gradle-8.14-bin.zip \
+            https://services.gradle.org/distributions/gradle-8.14-bin.zip
+
+          unzip -q /tmp/gradle-8.14-bin.zip -d /tmp
+
+          /tmp/gradle-8.14/bin/gradle \
+            -p android \
+            wrapper \
+            --gradle-version 8.14 \
+            --distribution-type bin
+
+          chmod +x android/gradlew
+
+          echo "Generated Gradle wrapper:"
+          ls -lah android/gradlew
+          ls -lah android/gradle/wrapper
+
+      - name: Verify Gradle and AGP versions
+        run: |
+          set -e
+          cd "$PROJECT_DIR/android"
+
+          ./gradlew --version
+
+          echo ""
+          echo "AGP configuration:"
+          grep -n 'com.android.application' settings.gradle.kts
+
+          echo ""
+          echo "Checking for AGP 9..."
+
+          if grep -Eq 'com\.android\.application.*version "9\.' settings.gradle.kts; then
+            echo "ERROR: AGP 9 detected."
+            exit 1
+          fi
+
+          echo "AGP 8 compatibility confirmed."
+
+      - name: Get Flutter dependencies
+        run: |
+          set -e
+          cd "$PROJECT_DIR"
+
+          flutter pub get
+
+      - name: Verify Ycash cryptographic sources
+        run: |
+          set -e
+          cd "$PROJECT_DIR"
+
+          if [ -f scripts/verify_ycash_lock.py ]; then
+            python3 scripts/verify_ycash_lock.py
+          else
+            echo "Verification script not found — skipping."
+          fi
+
+      - name: Analyze Flutter project
+        run: |
+          set -e
+          cd "$PROJECT_DIR"
+
+          flutter analyze --no-fatal-infos
+
+      - name: Run Flutter tests
+        run: |
+          set -e
+          cd "$PROJECT_DIR"
+
+          if [ -d test ] && find test -type f -name '*_test.dart' | grep -q .; then
+            flutter test
+          else
+            echo "No Flutter tests found — skipping."
+          fi
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
@@ -103,25 +285,20 @@ jobs:
         run: |
           cargo install cargo-ndk --locked
 
-      - name: Configure Android NDK
+      - name: Install Android NDK
         run: |
-          echo "ANDROID_NDK_HOME=$ANDROID_NDK_LATEST_HOME" >> "$GITHUB_ENV"
-          echo "ANDROID_NDK_ROOT=$ANDROID_NDK_LATEST_HOME" >> "$GITHUB_ENV"
+          set -e
 
-          echo "ANDROID_HOME=$ANDROID_HOME"
-          echo "ANDROID_NDK_LATEST_HOME=$ANDROID_NDK_LATEST_HOME"
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            --install "ndk;27.2.12479018"
 
-          if [ ! -d "$ANDROID_NDK_LATEST_HOME" ]; then
-            echo "ERROR: Android NDK not found."
-            exit 1
-          fi
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
 
-      - name: Verify build tools
+      - name: Verify Rust and Android tools
         run: |
           export PATH="$HOME/.cargo/bin:$PATH"
 
-          java -version
-          flutter --version
           rustc --version
           cargo --version
           cargo ndk --version
@@ -130,16 +307,56 @@ jobs:
           echo "Installed Rust targets:"
           rustup target list --installed
 
-      - name: Fix Android Gradle compatibility
+          echo ""
+          echo "Android NDK:"
+          echo "$ANDROID_NDK_HOME"
+
+          test -d "$ANDROID_NDK_HOME"
+
+      - name: Build debug APK
         run: |
           set -e
-
           cd "$PROJECT_DIR"
 
-          echo "========================================"
-          echo "BEFORE ANDROID GRADLE FIX"
-          echo "========================================"
+          export PATH="$HOME/.cargo/bin:$PATH"
 
-          find android -maxdepth 3 \
+          flutter clean
+          flutter pub get
+
+          flutter build apk --debug --verbose
+
+      - name: Build release APK
+        run: |
+          set -e
+          cd "$PROJECT_DIR"
+
+          export PATH="$HOME/.cargo/bin:$PATH"
+
+          flutter build apk --release --verbose
+
+      - name: Show generated APKs
+        if: always()
+        run: |
+          cd "$PROJECT_DIR"
+
+          echo "Generated APK files:"
+
+          find build \
             -type f \
-            \( -
+            -name "*.apk" \
+            -print \
+            2>/dev/null || true
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Ycash-Wallet-Debug-APK
+          path: ${{ env.PROJECT_DIR }}/build/app/outputs/flutter-apk/app-debug.apk
+          if-no-files-found: error
+
+      - name: Upload release APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Ycash-Wallet-Release-APK
+          path: ${{ env.PROJECT_DIR }}/build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
