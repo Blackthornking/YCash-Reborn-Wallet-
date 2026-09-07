@@ -13,13 +13,15 @@ jobs:
   build:
     name: Build Android APK
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: phase48
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Extract Ycash Wallet project
+        run: |
+          unzip -q ycashwallet.zip
+          test -f phase48/pubspec.yaml
 
       - name: Set up Java 17
         uses: actions/setup-java@v5
@@ -39,25 +41,23 @@ jobs:
           java -version
 
       - name: Verify Flutter project
+        working-directory: phase48
         run: |
           test -f pubspec.yaml
           test -d packages/ycash_core_ffi
 
       - name: Restore current Android host
+        working-directory: phase48
         run: |
-          # Regenerate Android from the same Flutter SDK used for the build.
-          # This prevents Gradle/AGP version mismatches and removed Android v1 embedding files.
           rm -rf android
           flutter create --platforms=android --org com.ycashfoundation .
 
-      - name: Upgrade Gradle wrapper to Flutter's minimum
-        working-directory: phase48/android
-        run: ./gradlew wrapper --gradle-version 8.14 --distribution-type all
-
       - name: Get dependencies
+        working-directory: phase48
         run: flutter pub get
 
       - name: Run Flutter tests
+        working-directory: phase48
         shell: bash
         run: |
           if [ -d test ] && find test -type f -name '*_test.dart' | grep -q .; then
@@ -67,9 +67,11 @@ jobs:
           fi
 
       - name: Build debug APK
+        working-directory: phase48
         run: flutter build apk --debug
 
       - name: Build release APK
+        working-directory: phase48
         run: flutter build apk --release
 
       - name: Upload debug APK
