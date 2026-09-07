@@ -1,316 +1,35 @@
-name: Build Flutter Android APK
-
-on:
-  workflow_dispatch:
-
-  push:
-    branches:
-      - main
-
-  pull_request:
-
-permissions:
-  contents: read
-
-jobs:
-  build:
-    name: Build Android APK
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Show repository contents
-        run: |
-          echo "Repository contents:"
-          ls -lah
-
-      - name: Find and extract wallet ZIP
-        run: |
-          ZIP_FILE=$(find . -maxdepth 2 -type f -iname "*.zip" | head -n 1)
-
-          if [ -z "$ZIP_FILE" ]; then
-            echo "ERROR: No ZIP file found"
-            exit 1
-          fi
-
-          echo "Found ZIP: $ZIP_FILE"
-
-          mkdir -p extracted_project
-          unzip -q "$ZIP_FILE" -d extracted_project
-
-          echo "Extracted files:"
-          find extracted_project -maxdepth 3 -type f | head -100
-
-      - name: Find Flutter project
-        run: |
-          PUBSPEC=$(find extracted_project -name pubspec.yaml -type f | head -n 1)
-
-          if [ -z "$PUBSPEC" ]; then
-            echo "ERROR: pubspec.yaml not found"
-            exit 1
-          fi
-
-          PROJECT_DIR=$(dirname "$PUBSPEC")
-
-          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-
-          echo "Flutter project:"
-          echo "$PROJECT_DIR"
-
-          ls -lah "$PROJECT_DIR"
-
-      - name: Set up Java 17
-        uses: actions/setup-java@v5
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
         with:
-          distribution: temurin
-          java-version: "17"
+          targets: |
+            aarch64-linux-android
+            armv7-linux-androideabi
+            x86_64-linux-android
 
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-          cache: true
-
-      - name: Install Rust and native build dependencies
+      - name: Install cargo-ndk
         run: |
-          sudo apt-get update
+          cargo install cargo-ndk --locked
 
-          sudo apt-get install -y \
-            bash \
-            build-essential \
-            cmake \
-            pkg-config \
-            clang \
-            libclang-dev \
-            curl
-
-          curl --proto '=https' --tlsv1.2 -sSf \
-            https://sh.rustup.rs | sh -s -- -y
-
-          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
-
-          source "$HOME/.cargo/env"
-
-          echo "Rust:"
-          rustc --version
-
-          echo "Cargo:"
-          cargo --version
-
-          echo "CMake:"
-          cmake --version
-
-          echo "Bash:"
-          bash --version
-
-      - name: Verify native build environment
+      - name: Configure Android NDK for Rust
         run: |
-          echo "Bash location:"
-          which bash
+          echo "ANDROID_NDK_HOME=$ANDROID_NDK_LATEST_HOME" >> $GITHUB_ENV
+          echo "ANDROID_NDK_ROOT=$ANDROID_NDK_LATEST_HOME" >> $GITHUB_ENV
 
-          echo "Rust location:"
-          which rustc || true
+          echo "ANDROID_NDK_HOME=$ANDROID_NDK_LATEST_HOME"
+          echo "ANDROID_NDK_ROOT=$ANDROID_NDK_LATEST_HOME"
 
-          echo "Cargo location:"
-          which cargo || true
-
-          echo "Checking bash binaries:"
-          ls -la /bin/bash
-          ls -la /usr/bin/bash || true
-
-          echo "PATH:"
-          echo "$PATH"
-
-      - name: Show tool versions
+      - name: Verify Rust and Android setup
         run: |
-          flutter --version
-          dart --version
-          java -version
+          export PATH="$HOME/.cargo/bin:$PATH"
+
           rustc --version
           cargo --version
+          cargo ndk --version
 
-      - name: Get Flutter dependencies
-        run: |
-          cd "$PROJECT_DIR"
-          flutter pub get
+          echo "Android NDK:"
+          echo "$ANDROID_NDK_LATEST_HOME"
 
-      - name: Verify project layout
-        run: |
-          cd "$PROJECT_DIR"
-
-          test -f pubspec.yaml
-
-          echo "Project structure:"
-          find . -maxdepth 2 -type f | sort
-
-      - name: Generate Android Gradle wrapper if missing
-        run: |
-          cd "$PROJECT_DIR"
-
-          if [ ! -d android ]; then
-            echo "Android folder missing. Creating Android platform..."
-            flutter create --platforms=android .
-          fi
-
-          if [ ! -f android/gradlew ]; then
-            echo "Gradle wrapper missing. Regenerating Android platform..."
-            flutter create --platforms=android .
-          fi
-
-          chmod +x android/gradlew
-
-          echo "Android files:"
-          ls -lah android
-
-          echo "Wrapper files:"
-          ls -lah android/gradle/wrapper || true
-
-      - name: Fix Android Gradle Plugin, Gradle and Kotlin versions
-        run: |
-          cd "$PROJECT_DIR"
-
-          echo "========================================"
-          echo "Applying Flutter compatibility fixes"
-          echo "========================================"
-
-          python3 <<'PY'
-          from pathlib import Path
-          import re
-
-          android = Path("android")
-
-          if not android.exists():
-              raise SystemExit("ERROR: Android directory not found")
-
-          AGP_VERSION = "8.11.1"
-          GRADLE_VERSION = "8.14"
-          KOTLIN_VERSION = "2.2.20"
-
-          files = [
-              android / "settings.gradle",
-              android / "settings.gradle.kts",
-              android / "build.gradle",
-              android / "build.gradle.kts",
-          ]
-
-          for path in files:
-              if not path.exists():
-                  continue
-
-              text = path.read_text()
-              original = text
-
-              # Android Gradle Plugin - Kotlin DSL
-              text = re.sub(
-                  r'(id\(\s*["\']com\.android\.(?:application|library)["\']\s*\)\s*version\s*["\'])[^"\']+',
-                  r'\g<1>' + AGP_VERSION,
-                  text
-              )
-
-              # Android Gradle Plugin - Groovy DSL
-              text = re.sub(
-                  r'(id\s+["\']com\.android\.(?:application|library)["\']\s+version\s+["\'])[^"\']+',
-                  r'\g<1>' + AGP_VERSION,
-                  text
-              )
-
-              # Old Android buildscript classpath
-              text = re.sub(
-                  r'(com\.android\.tools\.build:gradle:)[0-9A-Za-z.\-+]+',
-                  r'\g<1>' + AGP_VERSION,
-                  text
-              )
-
-              # Kotlin DSL
-              text = re.sub(
-                  r'(id\(\s*["\']org\.jetbrains\.kotlin\.android["\']\s*\)\s*version\s*["\'])[^"\']+',
-                  r'\g<1>' + KOTLIN_VERSION,
-                  text
-              )
-
-              # Groovy DSL
-              text = re.sub(
-                  r'(id\s+["\']org\.jetbrains\.kotlin\.android["\']\s+version\s+["\'])[^"\']+',
-                  r'\g<1>' + KOTLIN_VERSION,
-                  text
-              )
-
-              # Other Kotlin plugins
-              text = re.sub(
-                  r'(id\(\s*["\']org\.jetbrains\.kotlin(?:\.[a-z]+)*["\']\s*\)\s*version\s*["\'])[^"\']+',
-                  r'\g<1>' + KOTLIN_VERSION,
-                  text
-              )
-
-              # ext.kotlin_version
-              text = re.sub(
-                  r'(ext\.kotlin_version\s*=\s*["\'])[^"\']+',
-                  r'\g<1>' + KOTLIN_VERSION,
-                  text
-              )
-
-              # kotlin_version
-              text = re.sub(
-                  r'(kotlin_version\s*=\s*["\'])[^"\']+',
-                  r'\g<1>' + KOTLIN_VERSION,
-                  text
-              )
-
-              # Kotlin Gradle plugin classpath
-              text = re.sub(
-                  r'(org\.jetbrains\.kotlin:kotlin-gradle-plugin:)[0-9A-Za-z.\-+]+',
-                  r'\g<1>' + KOTLIN_VERSION,
-                  text
-              )
-
-              if text != original:
-                  path.write_text(text)
-                  print(f"Updated: {path}")
-
-          wrapper = android / "gradle" / "wrapper" / "gradle-wrapper.properties"
-
-          if not wrapper.exists():
-              raise SystemExit(
-                  "ERROR: gradle-wrapper.properties was not found"
-              )
-
-          text = wrapper.read_text()
-
-          text = re.sub(
-              r'distributionUrl=.*gradle-[0-9.]+-(?:bin|all)\.zip',
-              f'distributionUrl=https\\://services.gradle.org/distributions/gradle-{GRADLE_VERSION}-bin.zip',
-              text
-          )
-
-          wrapper.write_text(text)
-
-          print()
-          print("========================================")
-          print(f"Android Gradle Plugin: {AGP_VERSION}")
-          print(f"Gradle: {GRADLE_VERSION}")
-          print(f"Kotlin: {KOTLIN_VERSION}")
-          print("========================================")
-          PY
-
-          echo
-          echo "Final Gradle wrapper:"
-          cat android/gradle/wrapper/gradle-wrapper.properties
-
-          echo
-          echo "Android plugin references:"
-          grep -R \
-            "com.android.tools.build:gradle\|com.android.application\|com.android.library\|org.jetbrains.kotlin\|kotlin_version" \
-            android \
-            --include="*.gradle" \
-            --include="*.gradle.kts" \
-            || true
-
-      - name: Verify Gradle wrapper
-        run: |
-          cd "$PROJECT_DIR/android"
-          ./gradlew --version
+          test -d "$ANDROID_NDK_LATEST_HOME"
 
       - name: Verify Ycash cryptographic sources
         run: |
