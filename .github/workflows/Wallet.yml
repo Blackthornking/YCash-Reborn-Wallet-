@@ -81,53 +81,9 @@ jobs:
             echo "Android directory already exists."
           fi
 
-      - name: Pin Android Gradle Plugin below AGP 9
+      - name: Pin Android Gradle configuration
         working-directory: ${{ steps.flutter_project.outputs.dir }}
         run: |
           echo "Checking Android Gradle configuration..."
 
-          if [ -f "android/settings.gradle.kts" ]; then
-            sed -i -E \
-              's/(com\.android\.(application|library)".*version ")[^"]+/\18.7.3/g' \
-              android/settings.gradle.kts || true
-          fi
-
-          if [ -f "android/settings.gradle" ]; then
-            sed -i -E \
-              's/(com\.android\.(application|library) version ")[^"]+/\18.7.3/g' \
-              android/settings.gradle || true
-          fi
-
-          if [ -f "android/build.gradle" ]; then
-            sed -i -E \
-              "s/com\.android\.tools\.build:gradle:[0-9.]+/com.android.tools.build:gradle:8.7.3/g" \
-              android/build.gradle || true
-          fi
-
-          if [ -f "android/gradle/wrapper/gradle-wrapper.properties" ]; then
-            sed -i -E \
-              's/gradle-[0-9.]+-bin.zip/gradle-8.9-bin.zip/g' \
-              android/gradle/wrapper/gradle-wrapper.properties
-          fi
-
-          echo "Android configuration:"
-          find android -maxdepth 2 \( -name "settings.gradle" -o -name "settings.gradle.kts" -o -name "build.gradle" -o -name "build.gradle.kts" \) -print
-
-      - name: Get Flutter dependencies
-        working-directory: ${{ steps.flutter_project.outputs.dir }}
-        run: flutter pub get
-
-      - name: Clean previous build
-        working-directory: ${{ steps.flutter_project.outputs.dir }}
-        run: flutter clean
-
-      - name: Build Android APK
-        working-directory: ${{ steps.flutter_project.outputs.dir }}
-        run: flutter build apk --release
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: ycash-wallet-apk
-          path: ${{ steps.flutter_project.outputs.dir }}/build/app/outputs/flutter-apk/app-release.apk
-          if-no-files-found: error
+          if [ -f "
