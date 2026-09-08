@@ -14,13 +14,13 @@ permissions:
 
 jobs:
   build:
-    name: Build Android APK
+    name: Build Flutter APK
     runs-on: ubuntu-latest
 
     steps:
 
       # ========================================
-      # CHECKOUT REPOSITORY
+      # CHECKOUT
       # ========================================
 
       - name: Checkout repository
@@ -28,141 +28,7 @@ jobs:
 
 
       # ========================================
-      # FIND PROJECT ZIP
-      # ========================================
-
-      - name: Find wallet project ZIP
-        shell: bash
-        run: |
-          set -e
-
-          echo "========================================"
-          echo "REPOSITORY CONTENTS"
-          echo "========================================"
-
-          ls -lah
-
-          ZIP_FILE=""
-
-          for FILE in \
-            "ycashwalletone.zip" \
-            "ycashwallet_fixed_agp8111.zip" \
-            "ycashwallet-fixed.zip" \
-            "ycashwallet.zip" \
-            "ycash_compatible.zip"
-          do
-            if [ -f "$FILE" ]; then
-              ZIP_FILE="$FILE"
-              break
-            fi
-          done
-
-          if [ -z "$ZIP_FILE" ]; then
-            echo ""
-            echo "ERROR: No supported wallet project ZIP found."
-            echo ""
-            echo "Available files:"
-            find . -maxdepth 3 -type f -print
-            exit 1
-          fi
-
-          echo "ZIP_FILE=$ZIP_FILE" >> "$GITHUB_ENV"
-
-          echo ""
-          echo "SUCCESS: Found project ZIP:"
-          echo "$ZIP_FILE"
-
-
-      # ========================================
-      # EXTRACT PROJECT ZIP
-      # ========================================
-
-      - name: Extract project ZIP
-        shell: bash
-        run: |
-          set -e
-
-          rm -rf extracted_project
-          mkdir -p extracted_project
-
-          echo "========================================"
-          echo "EXTRACTING PROJECT"
-          echo "========================================"
-
-          echo "ZIP_FILE=$ZIP_FILE"
-
-          unzip -q "$ZIP_FILE" -d extracted_project
-
-          echo ""
-          echo "Extraction complete."
-
-          echo ""
-          echo "Searching for pubspec.yaml files..."
-
-          find extracted_project \
-            -type f \
-            -name "pubspec.yaml" \
-            -print
-
-
-      # ========================================
-      # LOCATE FLUTTER PROJECT
-      # ========================================
-
-      - name: Locate Flutter project
-        shell: bash
-        run: |
-          set -e
-
-          SEARCH_ROOT="$GITHUB_WORKSPACE/extracted_project"
-          PROJECT_DIR=""
-
-          echo "========================================"
-          echo "LOCATING FLUTTER PROJECT"
-          echo "========================================"
-
-          while IFS= read -r PUBSPEC; do
-
-            DIR="$(dirname "$PUBSPEC")"
-
-            echo "Checking: $DIR"
-
-            if [ -d "$DIR/android" ] && [ -d "$DIR/lib" ]; then
-              PROJECT_DIR="$DIR"
-              break
-            fi
-
-          done < <(
-            find "$SEARCH_ROOT" \
-              -type f \
-              -name "pubspec.yaml" \
-              ! -path "*/.dart_tool/*" \
-              ! -path "*/build/*"
-          )
-
-          if [ -z "$PROJECT_DIR" ]; then
-            echo ""
-            echo "ERROR: Could not locate a Flutter project."
-            echo ""
-            echo "Directory structure:"
-
-            find "$SEARCH_ROOT" \
-              -maxdepth 6 \
-              -type d \
-              -print
-
-            exit 1
-          fi
-
-          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-
-          echo ""
-          echo "SUCCESS: Flutter project found."
-          echo "PROJECT_DIR=$PROJECT_DIR"
-
-
-      # ========================================
-      # SET UP JAVA
+      # JAVA
       # ========================================
 
       - name: Set up Java 17
@@ -174,667 +40,136 @@ jobs:
 
 
       # ========================================
-      # SET UP FLUTTER
-      # ========================================
-
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-          cache: true
-
-
-      # ========================================
-      # SET UP RUST
-      # ========================================
-
-      - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
-
-
-      # ========================================
-      # INSTALL PROTOCOL BUFFER COMPILER
-      # FIXES: Could not find `protoc`
-      # ========================================
-
-      - name: Install Protocol Buffers Compiler
-        shell: bash
-        run: |
-          set -e
-
-          echo "========================================"
-          echo "INSTALLING PROTOCOL BUFFER COMPILER"
-          echo "========================================"
-
-          sudo apt-get update
-
-          sudo apt-get install -y \
-            protobuf-compiler \
-            pkg-config \
-            libssl-dev \
-            clang \
-            cmake
-
-          echo ""
-          echo "PROTOC VERSION:"
-          protoc --version
-
-          echo ""
-          echo "PROTOC PATH:"
-          which protoc
-
-          echo ""
-          echo "SUCCESS: protoc installed."
-
-
-      # ========================================
-      # INSTALL RUST ANDROID TARGETS
-      # ========================================
-
-      - name: Install Rust Android targets
-        shell: bash
-        run: |
-          set -e
-
-          echo "========================================"
-          echo "INSTALLING RUST ANDROID TARGETS"
-          echo "========================================"
-
-          rustc --version
-          cargo --version
-
-          rustup target add \
-            aarch64-linux-android \
-            armv7-linux-androideabi \
-            x86_64-linux-android
-
-          echo ""
-          echo "Installed Rust targets:"
-          rustup target list --installed
-
-
-      # ========================================
-      # INSTALL CARGO-NDK
-      # ========================================
-
-      - name: Install cargo-ndk
-        shell: bash
-        run: |
-          set -e
-
-          echo "========================================"
-          echo "INSTALLING CARGO-NDK"
-          echo "========================================"
-
-          cargo install cargo-ndk --locked
-
-          echo ""
-          cargo ndk --version
-
-          echo ""
-          echo "SUCCESS: cargo-ndk installed."
-
-
-      # ========================================
-      # SET UP ANDROID SDK
+      # ANDROID SDK + NDK
       # ========================================
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-
-      # ========================================
-      # INSTALL ANDROID COMPONENTS
-      # ========================================
-
-      - name: Install Android SDK components
-        shell: bash
+      - name: Install Android SDK and NDK
         run: |
-          set -e
-
-          echo "========================================"
-          echo "INSTALLING ANDROID COMPONENTS"
-          echo "========================================"
+          sdkmanager "platforms;android-35"
+          sdkmanager "build-tools;35.0.0"
+          sdkmanager "ndk;27.0.12077973"
+          sdkmanager "cmake;3.22.1"
 
           yes | sdkmanager --licenses || true
 
-          sdkmanager \
-            "platform-tools" \
-            "platforms;android-35" \
-            "build-tools;35.0.0" \
-            "ndk;28.2.13676358"
+
+      # ========================================
+      # FLUTTER
+      # ========================================
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.47.2"
+          channel: stable
+          cache: true
 
 
       # ========================================
-      # CONFIGURE ANDROID ENVIRONMENT
+      # SYSTEM DEPENDENCIES
       # ========================================
 
-      - name: Configure Android environment
-        shell: bash
+      - name: Install native build dependencies
         run: |
-          set -e
+          sudo apt-get update
 
-          NDK_VERSION="28.2.13676358"
-          NDK_PATH="$ANDROID_HOME/ndk/$NDK_VERSION"
-
-          echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
-          echo "ANDROID_NDK_HOME=$NDK_PATH" >> "$GITHUB_ENV"
-          echo "ANDROID_NDK_ROOT=$NDK_PATH" >> "$GITHUB_ENV"
-          echo "NDK_HOME=$NDK_PATH" >> "$GITHUB_ENV"
-
-          echo "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
-          echo "$ANDROID_HOME/build-tools/35.0.0" >> "$GITHUB_PATH"
-
-          echo ""
-          echo "ANDROID_HOME=$ANDROID_HOME"
-          echo "ANDROID_NDK_HOME=$NDK_PATH"
-          echo "ANDROID_NDK_ROOT=$NDK_PATH"
+          sudo apt-get install -y \
+            protobuf-compiler \
+            clang \
+            pkg-config \
+            libssl-dev
 
 
       # ========================================
-      # CONFIGURE RUST ANDROID LINKERS
+      # RUST
       # ========================================
 
-      - name: Configure Rust Android environment
-        shell: bash
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: |
+            aarch64-linux-android,
+            armv7-linux-androideabi,
+            x86_64-linux-android
+
+
+      # ========================================
+      # CARGO-NDK
+      # ========================================
+
+      - name: Install cargo-ndk
         run: |
-          set -e
-
-          TOOLCHAIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
-
-          echo "========================================"
-          echo "CONFIGURING RUST ANDROID ENVIRONMENT"
-          echo "========================================"
-
-          test -d "$TOOLCHAIN"
-
-          echo "CC_aarch64_linux_android=$TOOLCHAIN/aarch64-linux-android21-clang" >> "$GITHUB_ENV"
-          echo "CXX_aarch64_linux_android=$TOOLCHAIN/aarch64-linux-android21-clang++" >> "$GITHUB_ENV"
-
-          echo "CC_armv7_linux_androideabi=$TOOLCHAIN/armv7a-linux-androideabi21-clang" >> "$GITHUB_ENV"
-          echo "CXX_armv7_linux_androideabi=$TOOLCHAIN/armv7a-linux-androideabi21-clang++" >> "$GITHUB_ENV"
-
-          echo "CC_x86_64_linux_android=$TOOLCHAIN/x86_64-linux-android21-clang" >> "$GITHUB_ENV"
-          echo "CXX_x86_64_linux_android=$TOOLCHAIN/x86_64-linux-android21-clang++" >> "$GITHUB_ENV"
-
-          echo "$TOOLCHAIN" >> "$GITHUB_PATH"
-
-          echo "SUCCESS: Rust Android environment configured."
+          cargo install cargo-ndk --locked
 
 
       # ========================================
-      # VERIFY COMPLETE ENVIRONMENT
+      # VERIFY TOOLCHAIN
       # ========================================
 
-      - name: Verify build environment
-        shell: bash
+      - name: Verify toolchain
         run: |
-          set -e
-
-          echo "========================================"
-          echo "VERIFYING BUILD ENVIRONMENT"
-          echo "========================================"
-
-          java -version
-
-          echo ""
           flutter --version
-
-          echo ""
+          java -version
           rustc --version
           cargo --version
           cargo ndk --version
 
-          echo ""
-          echo "Protocol Buffer compiler:"
-          protoc --version
-          which protoc
-
-          echo ""
-          echo "Installed Rust targets:"
-          rustup target list --installed
-
-          echo ""
           echo "ANDROID_HOME=$ANDROID_HOME"
           echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME"
 
-          test -d "$ANDROID_HOME"
-          test -d "$ANDROID_NDK_HOME"
-
-          echo ""
-          echo "SUCCESS: Environment verified."
+          ls "$ANDROID_HOME/platforms/android-35"
 
 
       # ========================================
-      # CREATE / REPAIR GRADLE WRAPPER
+      # FLUTTER DEPENDENCIES
       # ========================================
 
-      - name: Create Gradle wrapper if missing
-        working-directory: ${{ env.PROJECT_DIR }}
-        shell: bash
+      - name: Get Flutter packages
         run: |
-          set -e
-
-          echo "========================================"
-          echo "CHECKING GRADLE WRAPPER"
-          echo "========================================"
-
-          if [ -f "android/gradlew" ] && \
-             [ -f "android/gradle/wrapper/gradle-wrapper.jar" ] && \
-             [ -f "android/gradle/wrapper/gradle-wrapper.properties" ]; then
-
-            chmod +x android/gradlew
-
-            echo "SUCCESS: Gradle wrapper already exists."
-            exit 0
-          fi
-
-          echo ""
-          echo "Gradle wrapper missing."
-          echo "Creating Gradle wrapper..."
-
-          GRADLE_VERSION="8.14.3"
-
-          TEMP_DIR="$(mktemp -d)"
-
-          cd "$TEMP_DIR"
-
-          printf 'rootProject.name = "wrapper-generator"\n' > settings.gradle
-          printf '\n' > build.gradle
-
-          echo "Downloading Gradle ${GRADLE_VERSION}..."
-
-          curl \
-            --fail \
-            --location \
-            --retry 3 \
-            --output "gradle-${GRADLE_VERSION}-bin.zip" \
-            "https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip"
-
-          unzip -q "gradle-${GRADLE_VERSION}-bin.zip"
-
-          echo "Generating wrapper..."
-
-          "./gradle-${GRADLE_VERSION}/bin/gradle" \
-            wrapper \
-            --gradle-version "${GRADLE_VERSION}" \
-            --distribution-type bin \
-            --no-daemon
-
-          mkdir -p "$PROJECT_DIR/android/gradle/wrapper"
-
-          cp gradlew \
-            "$PROJECT_DIR/android/gradlew"
-
-          cp gradlew.bat \
-            "$PROJECT_DIR/android/gradlew.bat"
-
-          cp gradle/wrapper/gradle-wrapper.jar \
-            "$PROJECT_DIR/android/gradle/wrapper/gradle-wrapper.jar"
-
-          cp gradle/wrapper/gradle-wrapper.properties \
-            "$PROJECT_DIR/android/gradle/wrapper/gradle-wrapper.properties"
-
-          chmod +x "$PROJECT_DIR/android/gradlew"
-
-          echo ""
-          echo "SUCCESS: GRADLE WRAPPER CREATED"
-
-
-      # ========================================
-      # VERIFY GRADLE
-      # ========================================
-
-      - name: Verify Gradle
-        working-directory: ${{ env.PROJECT_DIR }}/android
-        shell: bash
-        run: |
-          set -e
-
-          echo "========================================"
-          echo "VERIFYING GRADLE"
-          echo "========================================"
-
-          chmod +x ./gradlew
-          ./gradlew --version
-
-
-      # ========================================
-      # CLEAN PROJECT
-      # ========================================
-
-      - name: Clean previous build files
-        working-directory: ${{ env.PROJECT_DIR }}
-        shell: bash
-        run: |
-          set -e
-
-          echo "========================================"
-          echo "CLEANING PROJECT"
-          echo "========================================"
-
-          flutter clean || true
-
-          rm -rf .dart_tool
-          rm -rf build
-          rm -rf android/.gradle
-          rm -rf .gradle
-
-          echo "SUCCESS: Project cleaned."
-
-
-      # ========================================
-      # GET FLUTTER DEPENDENCIES
-      # ========================================
-
-      - name: Get Flutter dependencies
-        working-directory: ${{ env.PROJECT_DIR }}
-        shell: bash
-        run: |
-          set -e
-
-          echo "========================================"
-          echo "GETTING FLUTTER DEPENDENCIES"
-          echo "========================================"
-
+          flutter clean
           flutter pub get
 
 
       # ========================================
-      # ANALYZE DART CODE
+      # ANALYZE
       # ========================================
 
-      - name: Analyze Dart code
-        working-directory: ${{ env.PROJECT_DIR }}
-        shell: bash
+      - name: Analyze Dart source
         run: |
-          set +e
-
-          echo "========================================"
-          echo "ANALYZING DART CODE"
-          echo "========================================"
-
-          flutter analyze \
-            > "$GITHUB_WORKSPACE/flutter-analyze.log" 2>&1
-
-          ANALYZE_EXIT=$?
-
-          cat "$GITHUB_WORKSPACE/flutter-analyze.log"
-
-          if [ $ANALYZE_EXIT -ne 0 ]; then
-            echo ""
-            echo "WARNING: Flutter analysis found issues."
-            echo "Build will continue."
-          else
-            echo ""
-            echo "SUCCESS: Dart analysis completed."
-          fi
-
-          exit 0
+          flutter analyze
 
 
       # ========================================
-      # BUILD RELEASE APK
+      # BUILD APK
       # ========================================
 
-      - name: Build Flutter APK
-        working-directory: ${{ env.PROJECT_DIR }}
-        shell: bash
+      - name: Build release APK
         run: |
-          set +e
-
-          echo "========================================"
-          echo "BUILDING RELEASE APK"
-          echo "========================================"
-
-          echo "PROJECT_DIR=$PROJECT_DIR"
-          echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME"
-          echo "ANDROID_NDK_ROOT=$ANDROID_NDK_ROOT"
-
-          echo ""
-          echo "Checking protoc before build:"
-          protoc --version
-          which protoc
-
-          flutter build apk \
-            --release \
-            --verbose \
-            > "$GITHUB_WORKSPACE/flutter-build.log" 2>&1
-
-          BUILD_EXIT=$?
-
-          echo ""
-          echo "========================================"
-          echo "FULL BUILD LOG"
-          echo "========================================"
-
-          cat "$GITHUB_WORKSPACE/flutter-build.log"
-
-          if [ $BUILD_EXIT -ne 0 ]; then
-
-            echo ""
-            echo "========================================"
-            echo "IMPORTANT ERROR LINES"
-            echo "========================================"
-
-            grep \
-              -i \
-              -n \
-              -E "error|exception|protoc|protobuf|cargo|rust|ndk|failed|undefined|not found|type" \
-              "$GITHUB_WORKSPACE/flutter-build.log" \
-              | tail -n 500 || true
-
-            echo ""
-            echo "========================================"
-            echo "BUILD FAILED"
-            echo "========================================"
-
-            exit $BUILD_EXIT
-          fi
-
-          echo ""
-          echo "========================================"
-          echo "BUILD SUCCESSFUL"
-          echo "========================================"
-
-
-      # ========================================
-      # LOCATE RELEASE APK
-      # ========================================
-
-      - name: Locate release APK
-        working-directory: ${{ env.PROJECT_DIR }}
-        shell: bash
-        run: |
-          set -e
-
-          echo "========================================"
-          echo "LOCATING RELEASE APK"
-          echo "========================================"
-
-          APK=""
-
-          if [ -f "build/app/outputs/flutter-apk/app-release.apk" ]; then
-            APK="build/app/outputs/flutter-apk/app-release.apk"
-
-          elif [ -f "build/app/outputs/apk/release/app-release.apk" ]; then
-            APK="build/app/outputs/apk/release/app-release.apk"
-
-          elif [ -f "build/app/outputs/apk/release/app-release-unsigned.apk" ]; then
-            APK="build/app/outputs/apk/release/app-release-unsigned.apk"
-          fi
-
-          if [ -z "$APK" ]; then
-
-            echo "ERROR: No release APK found."
-
-            echo ""
-            echo "Searching for APK files..."
-
-            find build \
-              -type f \
-              -name "*.apk" \
-              -print || true
-
-            exit 1
-          fi
-
-          echo "APK_PATH=$PROJECT_DIR/$APK" >> "$GITHUB_ENV"
-
-          echo ""
-          echo "SUCCESS: APK FOUND"
-          echo "APK_PATH=$PROJECT_DIR/$APK"
-
-          ls -lh "$APK"
-
-
-      # ========================================
-      # GENERATE TEST SIGNING KEY
-      # ========================================
-
-      - name: Generate signing key
-        shell: bash
-        run: |
-          set -e
-
-          echo "========================================"
-          echo "GENERATING SIGNING KEY"
-          echo "========================================"
-
-          KEYSTORE="$RUNNER_TEMP/ycash-release.jks"
-
-          keytool -genkeypair \
-            -keystore "$KEYSTORE" \
-            -storepass "ycash-test-password" \
-            -keypass "ycash-test-password" \
-            -alias "ycash" \
-            -keyalg RSA \
-            -keysize 4096 \
-            -validity 10000 \
-            -dname "CN=Ycash,O=Ycash,C=GB"
-
-          echo "KEYSTORE_PATH=$KEYSTORE" >> "$GITHUB_ENV"
-
-          echo ""
-          echo "SUCCESS: Signing key created."
-
-
-      # ========================================
-      # CONFIGURE APK SIGNING TOOLS
-      # ========================================
-
-      - name: Configure APK signing tools
-        shell: bash
-        run: |
-          set -e
-
-          echo "========================================"
-          echo "CONFIGURING APK SIGNING TOOLS"
-          echo "========================================"
-
-          BUILD_TOOLS="$ANDROID_HOME/build-tools/35.0.0"
-
-          test -f "$BUILD_TOOLS/apksigner"
-          test -f "$BUILD_TOOLS/zipalign"
-
-          echo "APKSIGNER=$BUILD_TOOLS/apksigner" >> "$GITHUB_ENV"
-          echo "ZIPALIGN=$BUILD_TOOLS/zipalign" >> "$GITHUB_ENV"
-
-          "$BUILD_TOOLS/apksigner" --version
-
-
-      # ========================================
-      # ALIGN APK
-      # ========================================
-
-      - name: Align APK
-        shell: bash
-        run: |
-          set -e
-
-          mkdir -p "$GITHUB_WORKSPACE/signed-output"
-
-          "$ZIPALIGN" \
-            -f \
-            -p \
-            4 \
-            "$APK_PATH" \
-            "$GITHUB_WORKSPACE/signed-output/Ycash-aligned.apk"
-
-
-      # ========================================
-      # SIGN APK
-      # ========================================
-
-      - name: Sign APK
-        shell: bash
-        run: |
-          set -e
-
-          "$APKSIGNER" sign \
-            --ks "$KEYSTORE_PATH" \
-            --ks-key-alias "ycash" \
-            --ks-pass pass:ycash-test-password \
-            --key-pass pass:ycash-test-password \
-            --v1-signing-enabled true \
-            --v2-signing-enabled true \
-            --v3-signing-enabled true \
-            --out "$GITHUB_WORKSPACE/signed-output/Ycash.apk" \
-            "$GITHUB_WORKSPACE/signed-output/Ycash-aligned.apk"
+          flutter build apk --release --verbose
 
 
       # ========================================
       # VERIFY APK
       # ========================================
 
-      - name: Verify signed APK
-        shell: bash
+      - name: Verify APK exists
         run: |
-          set -e
+          ls -lh build/app/outputs/flutter-apk/
 
-          "$APKSIGNER" verify \
-            --verbose \
-            --print-certs \
-            "$GITHUB_WORKSPACE/signed-output/Ycash.apk"
-
-          "$ZIPALIGN" \
-            -c \
-            -v \
-            4 \
-            "$GITHUB_WORKSPACE/signed-output/Ycash.apk"
-
-          echo ""
-          echo "SUCCESS: APK VERIFIED"
-
-          ls -lh \
-            "$GITHUB_WORKSPACE/signed-output/Ycash.apk"
+          test -f build/app/outputs/flutter-apk/app-release.apk
 
 
       # ========================================
-      # UPLOAD BUILD LOGS
+      # UPLOAD APK
       # ========================================
 
-      - name: Upload build logs
-        if: always()
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Ycash-Build-Logs
-          path: |
-            ${{ github.workspace }}/flutter-build.log
-            ${{ github.workspace }}/flutter-analyze.log
-          if-no-files-found: warn
-          retention-days: 30
-
-
-      # ========================================
-      # UPLOAD VERIFIED APK
-      # ========================================
-
-      - name: Upload verified APK
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: Ycash-Wallet-Verified-APK
-          path: ${{ github.workspace }}/signed-output/Ycash.apk
+          name: Ycash-Reborn-release-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 14
