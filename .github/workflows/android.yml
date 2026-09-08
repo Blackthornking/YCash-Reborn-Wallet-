@@ -28,7 +28,7 @@ jobs:
 
 
       # ========================================
-      # CHECK PROJECT ZIP
+      # FIND PROJECT ZIP
       # ========================================
 
       - name: Find wallet project ZIP
@@ -74,7 +74,7 @@ jobs:
 
 
       # ========================================
-      # EXTRACT PROJECT
+      # EXTRACT PROJECT ZIP
       # ========================================
 
       - name: Extract project ZIP
@@ -89,13 +89,15 @@ jobs:
           echo "EXTRACTING PROJECT"
           echo "========================================"
 
+          echo "ZIP_FILE=$ZIP_FILE"
+
           unzip -q "$ZIP_FILE" -d extracted_project
 
           echo ""
-          echo "Project files extracted."
+          echo "Extraction complete."
 
           echo ""
-          echo "Searching for pubspec.yaml..."
+          echo "Searching for pubspec.yaml files..."
 
           find extracted_project \
             -type f \
@@ -123,8 +125,7 @@ jobs:
 
             DIR="$(dirname "$PUBSPEC")"
 
-            echo "Checking:"
-            echo "$DIR"
+            echo "Checking: $DIR"
 
             if [ -d "$DIR/android" ] && [ -d "$DIR/lib" ]; then
               PROJECT_DIR="$DIR"
@@ -142,7 +143,7 @@ jobs:
           if [ -z "$PROJECT_DIR" ]; then
 
             echo ""
-            echo "ERROR: Could not locate Flutter project."
+            echo "ERROR: Could not locate a Flutter project."
 
             echo ""
             echo "Directory structure:"
@@ -233,7 +234,7 @@ jobs:
 
           echo ""
           echo "ANDROID_HOME=$ANDROID_HOME"
-          echo "NDK=$ANDROID_HOME/ndk/28.2.13676358"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/28.2.13676358"
 
 
       # ========================================
@@ -246,13 +247,19 @@ jobs:
           set -e
 
           echo "========================================"
-          echo "FLUTTER DOCTOR"
+          echo "VERIFYING ENVIRONMENT"
           echo "========================================"
 
           java -version
+
+          echo ""
           flutter --version
 
+          echo ""
           flutter doctor -v
+
+          echo ""
+          echo "ANDROID_HOME=$ANDROID_HOME"
 
           test -d "$ANDROID_HOME"
           test -d "$ANDROID_HOME/ndk/28.2.13676358"
@@ -262,10 +269,10 @@ jobs:
 
 
       # ========================================
-      # CHECK GRADLE WRAPPER
+      # CREATE / REPAIR GRADLE WRAPPER
       # ========================================
 
-      - name: Check Gradle wrapper
+      - name: Create Gradle wrapper if missing
         working-directory: ${{ env.PROJECT_DIR }}
         shell: bash
         run: |
@@ -275,19 +282,80 @@ jobs:
           echo "CHECKING GRADLE WRAPPER"
           echo "========================================"
 
-          if [ ! -f "android/gradlew" ]; then
-            echo "ERROR: android/gradlew is missing."
-            exit 1
+          if [ -f "android/gradlew" ] && \
+             [ -f "android/gradle/wrapper/gradle-wrapper.jar" ] && \
+             [ -f "android/gradle/wrapper/gradle-wrapper.properties" ]; then
+
+            chmod +x android/gradlew
+
+            echo "SUCCESS: Gradle wrapper already exists."
+            exit 0
           fi
 
-          if [ ! -f "android/gradle/wrapper/gradle-wrapper.properties" ]; then
-            echo "ERROR: Gradle wrapper properties missing."
-            exit 1
-          fi
+          echo ""
+          echo "Gradle wrapper missing."
+          echo "Creating Gradle wrapper..."
 
-          chmod +x android/gradlew
+          GRADLE_VERSION="8.14.3"
 
-          echo "SUCCESS: Gradle wrapper found."
+          TEMP_DIR="$(mktemp -d)"
+
+          echo ""
+          echo "Using temporary directory:"
+          echo "$TEMP_DIR"
+
+          cd "$TEMP_DIR"
+
+          printf 'rootProject.name = "wrapper-generator"\n' > settings.gradle
+          printf '\n' > build.gradle
+
+          echo ""
+          echo "Downloading Gradle ${GRADLE_VERSION}..."
+
+          curl \
+            --fail \
+            --location \
+            --retry 3 \
+            --output "gradle-${GRADLE_VERSION}-bin.zip" \
+            "https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip"
+
+          unzip -q \
+            "gradle-${GRADLE_VERSION}-bin.zip"
+
+          echo ""
+          echo "Generating wrapper..."
+
+          "./gradle-${GRADLE_VERSION}/bin/gradle" \
+            wrapper \
+            --gradle-version "${GRADLE_VERSION}" \
+            --distribution-type bin \
+            --no-daemon
+
+          mkdir -p "$PROJECT_DIR/android/gradle/wrapper"
+
+          cp gradlew \
+            "$PROJECT_DIR/android/gradlew"
+
+          cp gradlew.bat \
+            "$PROJECT_DIR/android/gradlew.bat"
+
+          cp gradle/wrapper/gradle-wrapper.jar \
+            "$PROJECT_DIR/android/gradle/wrapper/gradle-wrapper.jar"
+
+          cp gradle/wrapper/gradle-wrapper.properties \
+            "$PROJECT_DIR/android/gradle/wrapper/gradle-wrapper.properties"
+
+          chmod +x "$PROJECT_DIR/android/gradlew"
+
+          echo ""
+          echo "========================================"
+          echo "SUCCESS: GRADLE WRAPPER CREATED"
+          echo "========================================"
+
+          ls -lah "$PROJECT_DIR/android/gradlew"
+
+          ls -lah \
+            "$PROJECT_DIR/android/gradle/wrapper/"
 
 
       # ========================================
@@ -299,6 +367,10 @@ jobs:
         shell: bash
         run: |
           set -e
+
+          echo "========================================"
+          echo "VERIFYING GRADLE"
+          echo "========================================"
 
           chmod +x ./gradlew
 
@@ -319,11 +391,14 @@ jobs:
           echo "CLEANING PROJECT"
           echo "========================================"
 
-          flutter clean
+          flutter clean || true
 
           rm -rf .dart_tool
           rm -rf build
           rm -rf android/.gradle
+          rm -rf .gradle
+
+          echo "SUCCESS: Project cleaned."
 
 
       # ========================================
@@ -344,7 +419,7 @@ jobs:
 
 
       # ========================================
-      # CHECK DART CODE FIRST
+      # ANALYZE DART CODE
       # ========================================
 
       - name: Analyze Dart code
@@ -357,7 +432,8 @@ jobs:
           echo "ANALYZING DART CODE"
           echo "========================================"
 
-          flutter analyze > "$GITHUB_WORKSPACE/flutter-analyze.log" 2>&1
+          flutter analyze \
+            > "$GITHUB_WORKSPACE/flutter-analyze.log" 2>&1
 
           ANALYZE_EXIT=$?
 
@@ -365,8 +441,11 @@ jobs:
 
           if [ $ANALYZE_EXIT -ne 0 ]; then
             echo ""
-            echo "WARNING: flutter analyze found issues."
-            echo "Continuing to build so the full compiler error can be captured."
+            echo "WARNING: Flutter analysis found issues."
+            echo "The build will continue to capture the full compiler error."
+          else
+            echo ""
+            echo "SUCCESS: Dart analysis completed."
           fi
 
           exit 0
@@ -395,7 +474,7 @@ jobs:
 
           echo ""
           echo "========================================"
-          echo "BUILD LOG"
+          echo "FULL BUILD LOG"
           echo "========================================"
 
           cat "$GITHUB_WORKSPACE/flutter-build.log"
@@ -407,10 +486,12 @@ jobs:
             echo "IMPORTANT ERROR LINES"
             echo "========================================"
 
-            grep -i -n -E \
-              "error|exception|target kernel_snapshot|failed|undefined|not found|type" \
+            grep \
+              -i \
+              -n \
+              -E "error|exception|target kernel_snapshot|failed|undefined|not found|type" \
               "$GITHUB_WORKSPACE/flutter-build.log" \
-              | tail -n 200 || true
+              | tail -n 300 || true
 
             echo ""
             echo "========================================"
@@ -450,14 +531,23 @@ jobs:
 
             APK="build/app/outputs/apk/release/app-release.apk"
 
-          else
+          elif [ -f "build/app/outputs/apk/release/app-release-unsigned.apk" ]; then
+
+            APK="build/app/outputs/apk/release/app-release-unsigned.apk"
+
+          fi
+
+          if [ -z "$APK" ]; then
 
             echo "ERROR: No release APK found."
 
             echo ""
             echo "Searching for APK files..."
 
-            find build -type f -name "*.apk" -print || true
+            find build \
+              -type f \
+              -name "*.apk" \
+              -print || true
 
             exit 1
           fi
@@ -466,7 +556,7 @@ jobs:
 
           echo ""
           echo "SUCCESS: APK FOUND"
-          echo "$PROJECT_DIR/$APK"
+          echo "APK_PATH=$PROJECT_DIR/$APK"
 
           ls -lh "$APK"
 
@@ -498,6 +588,7 @@ jobs:
 
           echo "KEYSTORE_PATH=$KEYSTORE" >> "$GITHUB_ENV"
 
+          echo ""
           echo "SUCCESS: Signing key created."
 
 
@@ -509,6 +600,10 @@ jobs:
         shell: bash
         run: |
           set -e
+
+          echo "========================================"
+          echo "CONFIGURING APK SIGNING TOOLS"
+          echo "========================================"
 
           BUILD_TOOLS="$ANDROID_HOME/build-tools/35.0.0"
 
@@ -530,6 +625,10 @@ jobs:
         run: |
           set -e
 
+          echo "========================================"
+          echo "ALIGNING APK"
+          echo "========================================"
+
           mkdir -p "$GITHUB_WORKSPACE/signed-output"
 
           "$ZIPALIGN" \
@@ -548,6 +647,10 @@ jobs:
         shell: bash
         run: |
           set -e
+
+          echo "========================================"
+          echo "SIGNING APK"
+          echo "========================================"
 
           "$APKSIGNER" sign \
             --ks "$KEYSTORE_PATH" \
@@ -591,9 +694,12 @@ jobs:
             "$GITHUB_WORKSPACE/signed-output/Ycash.apk"
 
           echo ""
+          echo "========================================"
           echo "SUCCESS: APK VERIFIED"
+          echo "========================================"
 
-          ls -lh "$GITHUB_WORKSPACE/signed-output/Ycash.apk"
+          ls -lh \
+            "$GITHUB_WORKSPACE/signed-output/Ycash.apk"
 
 
       # ========================================
