@@ -1,6 +1,6 @@
 name: Build Android APK
 
-"on":
+on:
   workflow_dispatch:
 
   push:
@@ -193,6 +193,41 @@ jobs:
 
 
       # ========================================
+      # INSTALL PROTOCOL BUFFER COMPILER
+      # FIXES: Could not find `protoc`
+      # ========================================
+
+      - name: Install Protocol Buffers Compiler
+        shell: bash
+        run: |
+          set -e
+
+          echo "========================================"
+          echo "INSTALLING PROTOCOL BUFFER COMPILER"
+          echo "========================================"
+
+          sudo apt-get update
+
+          sudo apt-get install -y \
+            protobuf-compiler \
+            pkg-config \
+            libssl-dev \
+            clang \
+            cmake
+
+          echo ""
+          echo "PROTOC VERSION:"
+          protoc --version
+
+          echo ""
+          echo "PROTOC PATH:"
+          which protoc
+
+          echo ""
+          echo "SUCCESS: protoc installed."
+
+
+      # ========================================
       # INSTALL RUST ANDROID TARGETS
       # ========================================
 
@@ -297,38 +332,47 @@ jobs:
 
 
       # ========================================
-      # VERIFY RUST ENVIRONMENT
+      # CONFIGURE RUST ANDROID LINKERS
       # ========================================
 
-      - name: Verify Rust environment
+      - name: Configure Rust Android environment
+        shell: bash
+        run: |
+          set -e
+
+          TOOLCHAIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
+
+          echo "========================================"
+          echo "CONFIGURING RUST ANDROID ENVIRONMENT"
+          echo "========================================"
+
+          test -d "$TOOLCHAIN"
+
+          echo "CC_aarch64_linux_android=$TOOLCHAIN/aarch64-linux-android21-clang" >> "$GITHUB_ENV"
+          echo "CXX_aarch64_linux_android=$TOOLCHAIN/aarch64-linux-android21-clang++" >> "$GITHUB_ENV"
+
+          echo "CC_armv7_linux_androideabi=$TOOLCHAIN/armv7a-linux-androideabi21-clang" >> "$GITHUB_ENV"
+          echo "CXX_armv7_linux_androideabi=$TOOLCHAIN/armv7a-linux-androideabi21-clang++" >> "$GITHUB_ENV"
+
+          echo "CC_x86_64_linux_android=$TOOLCHAIN/x86_64-linux-android21-clang" >> "$GITHUB_ENV"
+          echo "CXX_x86_64_linux_android=$TOOLCHAIN/x86_64-linux-android21-clang++" >> "$GITHUB_ENV"
+
+          echo "$TOOLCHAIN" >> "$GITHUB_PATH"
+
+          echo "SUCCESS: Rust Android environment configured."
+
+
+      # ========================================
+      # VERIFY COMPLETE ENVIRONMENT
+      # ========================================
+
+      - name: Verify build environment
         shell: bash
         run: |
           set -e
 
           echo "========================================"
-          echo "VERIFYING RUST ENVIRONMENT"
-          echo "========================================"
-
-          rustc --version
-          cargo --version
-          cargo ndk --version
-
-          echo ""
-          echo "Installed Rust targets:"
-          rustup target list --installed
-
-
-      # ========================================
-      # VERIFY FLUTTER ENVIRONMENT
-      # ========================================
-
-      - name: Verify Flutter environment
-        shell: bash
-        run: |
-          set -e
-
-          echo "========================================"
-          echo "VERIFYING FLUTTER ENVIRONMENT"
+          echo "VERIFYING BUILD ENVIRONMENT"
           echo "========================================"
 
           java -version
@@ -337,12 +381,22 @@ jobs:
           flutter --version
 
           echo ""
-          flutter doctor -v
+          rustc --version
+          cargo --version
+          cargo ndk --version
+
+          echo ""
+          echo "Protocol Buffer compiler:"
+          protoc --version
+          which protoc
+
+          echo ""
+          echo "Installed Rust targets:"
+          rustup target list --installed
 
           echo ""
           echo "ANDROID_HOME=$ANDROID_HOME"
           echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME"
-          echo "ANDROID_NDK_ROOT=$ANDROID_NDK_ROOT"
 
           test -d "$ANDROID_HOME"
           test -d "$ANDROID_NDK_HOME"
@@ -537,6 +591,11 @@ jobs:
           echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME"
           echo "ANDROID_NDK_ROOT=$ANDROID_NDK_ROOT"
 
+          echo ""
+          echo "Checking protoc before build:"
+          protoc --version
+          which protoc
+
           flutter build apk \
             --release \
             --verbose \
@@ -561,9 +620,9 @@ jobs:
             grep \
               -i \
               -n \
-              -E "error|exception|cargo|rust|ndk|failed|undefined|not found|type" \
+              -E "error|exception|protoc|protobuf|cargo|rust|ndk|failed|undefined|not found|type" \
               "$GITHUB_WORKSPACE/flutter-build.log" \
-              | tail -n 400 || true
+              | tail -n 500 || true
 
             echo ""
             echo "========================================"
@@ -693,10 +752,6 @@ jobs:
         run: |
           set -e
 
-          echo "========================================"
-          echo "ALIGNING APK"
-          echo "========================================"
-
           mkdir -p "$GITHUB_WORKSPACE/signed-output"
 
           "$ZIPALIGN" \
@@ -715,10 +770,6 @@ jobs:
         shell: bash
         run: |
           set -e
-
-          echo "========================================"
-          echo "SIGNING APK"
-          echo "========================================"
 
           "$APKSIGNER" sign \
             --ks "$KEYSTORE_PATH" \
@@ -741,19 +792,10 @@ jobs:
         run: |
           set -e
 
-          echo "========================================"
-          echo "VERIFYING APK SIGNATURE"
-          echo "========================================"
-
           "$APKSIGNER" verify \
             --verbose \
             --print-certs \
             "$GITHUB_WORKSPACE/signed-output/Ycash.apk"
-
-          echo ""
-          echo "========================================"
-          echo "VERIFYING APK ALIGNMENT"
-          echo "========================================"
 
           "$ZIPALIGN" \
             -c \
@@ -762,9 +804,7 @@ jobs:
             "$GITHUB_WORKSPACE/signed-output/Ycash.apk"
 
           echo ""
-          echo "========================================"
           echo "SUCCESS: APK VERIFIED"
-          echo "========================================"
 
           ls -lh \
             "$GITHUB_WORKSPACE/signed-output/Ycash.apk"
@@ -780,8 +820,8 @@ jobs:
         with:
           name: Ycash-Build-Logs
           path: |
-            flutter-build.log
-            flutter-analyze.log
+            ${{ github.workspace }}/flutter-build.log
+            ${{ github.workspace }}/flutter-analyze.log
           if-no-files-found: warn
           retention-days: 30
 
@@ -795,6 +835,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Ycash-Wallet-Verified-APK
-          path: signed-output/Ycash.apk
+          path: ${{ github.workspace }}/signed-output/Ycash.apk
           if-no-files-found: error
           retention-days: 30
