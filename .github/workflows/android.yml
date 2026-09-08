@@ -1,99 +1,505 @@
-name: Compile and Test Native YCash Core
+name: Build Android APK
 
 on:
   workflow_dispatch:
+
   push:
-    branches: [main]
+    branches:
+      - main
+
   pull_request:
 
 permissions:
   contents: read
 
 jobs:
-  native-core:
-    name: Compile and Test Native YCash Core
+  build:
+    name: Build Android APK
     runs-on: ubuntu-latest
 
     steps:
+
+      # ========================================
+      # CHECKOUT
+      # ========================================
+
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Show repository contents
+
+      # ========================================
+      # CHECK ZIP
+      # ========================================
+
+      - name: Check repository contents
         run: |
-          echo "Repository root:"
-          ls -la
+          set -e
 
-      - name: Find wallet ZIP
-        run: |
-          set -euo pipefail
+          echo "========================================"
+          echo "REPOSITORY CONTENTS"
+          echo "========================================"
 
-          ZIP_FILE=$(find . -maxdepth 2 -type f \( -iname "*.zip" \) | head -n 1)
-
-          if [ -z "$ZIP_FILE" ]; then
-            echo "ERROR: No ZIP file found."
-            exit 1
-          fi
-
-          echo "Found ZIP:"
-          echo "$ZIP_FILE"
-
-          echo "ZIP_FILE=$ZIP_FILE" >> "$GITHUB_ENV"
-
-      - name: Extract YCash Wallet project
-        run: |
-          set -euo pipefail
-
-          mkdir -p wallet_source
-
-          unzip -q "$ZIP_FILE" -d wallet_source
-
-          echo "Extracted project structure:"
-          find wallet_source -maxdepth 4 -type f | head -100
-
-      - name: Find native YCash core
-        run: |
-          set -euo pipefail
-
-          CARGO_TOML=$(find wallet_source -type f -path "*/ycash_core/Cargo.toml" | head -n 1)
-
-          if [ -z "$CARGO_TOML" ]; then
-            echo "ERROR: ycash_core/Cargo.toml was not found after extraction."
-            echo ""
-            echo "Available extracted files:"
-            find wallet_source -maxdepth 5 -type f | head -200
-            exit 1
-          fi
-
-          YCORE_DIR=$(dirname "$CARGO_TOML")
-
-          echo "Found native core:"
-          echo "$YCORE_DIR"
-
-          echo "YCORE_DIR=$YCORE_DIR" >> "$GITHUB_ENV"
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Show Rust version
-        run: |
-          rustc --version
-          cargo --version
-
-      - name: Show native core structure
-        run: |
-          echo "Native core:"
-          ls -la "$YCORE_DIR"
+          ls -lah
 
           echo ""
-          echo "Cargo.toml:"
-          cat "$YCORE_DIR/Cargo.toml"
 
-      - name: Cargo check
-        working-directory: ${{ env.YCORE_DIR }}
-        run: |
-          cargo check --all-features
+          if [ ! -f "ycashwallet.zip" ]; then
+            echo "ERROR: ycashwallet.zip was not found."
+            exit 1
+          fi
 
-      - name: Run native tests
-        working-directory: ${{ env.YCORE_DIR }}
+          echo "SUCCESS: ycashwallet.zip found."
+
+
+      # ========================================
+      # EXTRACT ZIP
+      # ========================================
+
+      - name: Extract project ZIP
         run: |
-          cargo test --all-features
+          set -e
+
+          echo "========================================"
+          echo "EXTRACTING ycashwallet.zip"
+          echo "========================================"
+
+          rm -rf extracted_project
+          mkdir -p extracted_project
+
+          unzip -q ycashwallet.zip -d extracted_project
+
+          echo ""
+          echo "Extraction complete."
+
+          echo ""
+          echo "Searching for Flutter projects..."
+
+          find extracted_project \
+            -maxdepth 10 \
+            -type f \
+            -name "pubspec.yaml" \
+            -print
+
+
+      # ========================================
+      # LOCATE FLUTTER PROJECT
+      # ========================================
+
+      - name: Locate Flutter project
+        run: |
+          set -e
+
+          SEARCH_ROOT="$GITHUB_WORKSPACE/extracted_project"
+
+          PROJECT_DIR=""
+
+          while IFS= read -r PUBSPEC; do
+
+            DIR="$(dirname "$PUBSPEC")"
+
+            echo "Checking: $DIR"
+
+            if [ -d "$DIR/android" ]; then
+              PROJECT_DIR="$DIR"
+              break
+            fi
+
+          done < <(
+            find "$SEARCH_ROOT" \
+              -type f \
+              -name "pubspec.yaml" \
+              ! -path "*/.dart_tool/*" \
+              ! -path "*/build/*"
+          )
+
+          if [ -z "$PROJECT_DIR" ]; then
+            echo "ERROR: Could not locate Flutter project."
+            exit 1
+          fi
+
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+
+          echo ""
+          echo "========================================"
+          echo "FLUTTER PROJECT FOUND"
+          echo "========================================"
+
+          echo "PROJECT_DIR=$PROJECT_DIR"
+
+          echo ""
+          echo "PROJECT FILES:"
+          ls -lah "$PROJECT_DIR"
+
+          echo ""
+          echo "ANDROID FILES:"
+          ls -lah "$PROJECT_DIR/android"
+
+
+      # ========================================
+      # JAVA
+      # ========================================
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+
+      # ========================================
+      # FLUTTER
+      # ========================================
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+
+      # ========================================
+      # ANDROID SDK
+      # ========================================
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+
+      - name: Install Android SDK components
+        run: |
+          set -e
+
+          echo "ANDROID_HOME=$ANDROID_HOME"
+
+          yes | sdkmanager --licenses || true
+
+          sdkmanager \
+            "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;35.0.0" \
+            "ndk;29.0.14206865"
+
+
+      # ========================================
+      # ANDROID ENVIRONMENT
+      # ========================================
+
+      - name: Configure Android environment
+        run: |
+          set -e
+
+          echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/29.0.14206865" >> "$GITHUB_ENV"
+          echo "NDK_HOME=$ANDROID_HOME/ndk/29.0.14206865" >> "$GITHUB_ENV"
+
+          echo "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
+
+
+      # ========================================
+      # RUST
+      # ========================================
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: |
+            aarch64-linux-android
+            armv7-linux-androideabi
+            x86_64-linux-android
+
+
+      - name: Install cargo-ndk
+        run: |
+          cargo install cargo-ndk --locked
+
+
+      # ========================================
+      # VERIFY TOOLS
+      # ========================================
+
+      - name: Verify toolchains
+        run: |
+          set -e
+
+          echo "========================================"
+          echo "JAVA"
+          echo "========================================"
+
+          java -version
+
+          echo ""
+          echo "========================================"
+          echo "FLUTTER"
+          echo "========================================"
+
+          flutter --version
+
+          echo ""
+          echo "========================================"
+          echo "RUST"
+          echo "========================================"
+
+          rustc --version
+          cargo --version
+          cargo ndk --version
+
+          echo ""
+          echo "========================================"
+          echo "ANDROID SDK"
+          echo "========================================"
+
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/29.0.14206865"
+
+
+      # ========================================
+      # CREATE GRADLE WRAPPER IF MISSING
+      # ========================================
+
+      - name: Create Gradle wrapper if missing
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          set -e
+
+          echo "========================================"
+          echo "CHECKING GRADLE WRAPPER"
+          echo "========================================"
+
+          if [ -f "android/gradlew" ] && \
+             [ -f "android/gradle/wrapper/gradle-wrapper.jar" ] && \
+             [ -f "android/gradle/wrapper/gradle-wrapper.properties" ]; then
+
+            echo "SUCCESS: Gradle wrapper already exists."
+
+            chmod +x android/gradlew
+
+            exit 0
+          fi
+
+          echo ""
+          echo "Gradle wrapper is missing."
+          echo "Creating Gradle wrapper..."
+
+          GRADLE_VERSION="8.14.3"
+
+          if [ -f "android/gradle/wrapper/gradle-wrapper.properties" ]; then
+
+            DETECTED_VERSION="$(
+              grep -oE 'gradle-[0-9]+\.[0-9]+(\.[0-9]+)?' \
+                android/gradle/wrapper/gradle-wrapper.properties \
+                | head -n1 \
+                | sed 's/^gradle-//'
+            )"
+
+            if [ -n "$DETECTED_VERSION" ]; then
+              GRADLE_VERSION="$DETECTED_VERSION"
+            fi
+          fi
+
+          echo "Using Gradle ${GRADLE_VERSION}"
+
+          TEMP_DIR="$(mktemp -d)"
+
+          echo "Temporary directory: $TEMP_DIR"
+
+          cd "$TEMP_DIR"
+
+          printf 'rootProject.name = "wrapper-generator"\n' > settings.gradle
+          printf '\n' > build.gradle
+
+          echo "Downloading Gradle ${GRADLE_VERSION}..."
+
+          curl \
+            --fail \
+            --location \
+            --retry 3 \
+            --output "gradle-${GRADLE_VERSION}-bin.zip" \
+            "https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip"
+
+          echo "Extracting Gradle..."
+
+          unzip -q \
+            "gradle-${GRADLE_VERSION}-bin.zip"
+
+          echo "Generating Gradle wrapper..."
+
+          "./gradle-${GRADLE_VERSION}/bin/gradle" \
+            wrapper \
+            --gradle-version "${GRADLE_VERSION}" \
+            --distribution-type bin \
+            --no-daemon
+
+          echo "Copying Gradle wrapper to Android project..."
+
+          mkdir -p "${PROJECT_DIR}/android/gradle/wrapper"
+
+          cp gradlew \
+            "${PROJECT_DIR}/android/gradlew"
+
+          cp gradlew.bat \
+            "${PROJECT_DIR}/android/gradlew.bat"
+
+          cp gradle/wrapper/gradle-wrapper.jar \
+            "${PROJECT_DIR}/android/gradle/wrapper/gradle-wrapper.jar"
+
+          cp gradle/wrapper/gradle-wrapper.properties \
+            "${PROJECT_DIR}/android/gradle/wrapper/gradle-wrapper.properties"
+
+          chmod +x "${PROJECT_DIR}/android/gradlew"
+
+          echo ""
+          echo "========================================"
+          echo "GRADLE WRAPPER CREATED SUCCESSFULLY"
+          echo "========================================"
+
+          ls -lah "${PROJECT_DIR}/android"
+
+          echo ""
+
+          ls -lah \
+            "${PROJECT_DIR}/android/gradle/wrapper"
+
+
+      # ========================================
+      # SHOW ANDROID GRADLE CONFIGURATION
+      # ========================================
+
+      - name: Show Android Gradle configuration
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          set -e
+
+          echo "========================================"
+          echo "ANDROID GRADLE FILES"
+          echo "========================================"
+
+          find android \
+            -type f \
+            \( \
+              -name "*.gradle" \
+              -o -name "*.gradle.kts" \
+              -o -name "*.toml" \
+              -o -name "gradle.properties" \
+            \) \
+            -print \
+            | sort
+
+          echo ""
+          echo "========================================"
+          echo "AGP REFERENCES"
+          echo "========================================"
+
+          grep -Rni \
+            -E \
+            'com\.android\.application|com\.android\.library|com\.android\.tools\.build|agp[[:space:]]*=|androidGradlePlugin' \
+            android \
+            --include="*.gradle" \
+            --include="*.gradle.kts" \
+            --include="*.toml" || true
+
+
+      # ========================================
+      # VERIFY GRADLE WRAPPER
+      # ========================================
+
+      - name: Verify Gradle
+        working-directory: ${{ env.PROJECT_DIR }}/android
+        run: |
+          set -e
+
+          echo "========================================"
+          echo "VERIFYING GRADLE WRAPPER"
+          echo "========================================"
+
+          if [ ! -f "./gradlew" ]; then
+            echo "ERROR: gradlew is missing."
+            exit 1
+          fi
+
+          if [ ! -f "./gradle/wrapper/gradle-wrapper.jar" ]; then
+            echo "ERROR: gradle-wrapper.jar is missing."
+            exit 1
+          fi
+
+          chmod +x ./gradlew
+
+          echo ""
+          echo "========================================"
+          echo "GRADLE VERSION"
+          echo "========================================"
+
+          ./gradlew --version
+
+
+      # ========================================
+      # FLUTTER DEPENDENCIES
+      # ========================================
+
+      - name: Get Flutter dependencies
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          set -e
+
+          echo "========================================"
+          echo "GETTING FLUTTER DEPENDENCIES"
+          echo "========================================"
+
+          flutter clean
+
+          rm -rf android/.gradle
+          rm -rf .gradle
+
+          flutter pub get
+
+
+      # ========================================
+      # BUILD APK
+      # ========================================
+
+      - name: Build Flutter APK
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          set -e
+
+          echo "========================================"
+          echo "BUILDING RELEASE APK"
+          echo "========================================"
+
+          flutter build apk \
+            --release \
+            --verbose
+
+
+      # ========================================
+      # SHOW APK
+      # ========================================
+
+      - name: Show generated APK files
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          set -e
+
+          echo "========================================"
+          echo "GENERATED APK FILES"
+          echo "========================================"
+
+          find build \
+            -type f \
+            -name "*.apk" \
+            -print \
+            -exec ls -lh {} \;
+
+
+      # ========================================
+      # UPLOAD APK
+      # ========================================
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Ycash-Wallet-Release-APK
+          path: |
+            ${{ env.PROJECT_DIR }}/build/app/outputs/flutter-apk/*.apk
+            ${{ env.PROJECT_DIR }}/build/app/outputs/apk/release/*.apk
+          if-no-files-found: error
+          retention-days: 30
