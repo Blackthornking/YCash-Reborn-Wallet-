@@ -183,6 +183,21 @@ jobs:
 
 
       # ========================================
+      # PROTOBUF / PROTOC
+      # ========================================
+
+      - name: Install Protobuf Compiler
+        run: |
+          set -e
+
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler
+
+          echo "Installed protoc:"
+          protoc --version
+
+
+      # ========================================
       # RUST
       # ========================================
 
@@ -197,6 +212,8 @@ jobs:
 
       - name: Install cargo-ndk
         run: |
+          set -e
+
           cargo install cargo-ndk --locked
 
 
@@ -208,14 +225,22 @@ jobs:
         run: |
           set -e
 
+          echo "========================================"
+          echo "VERIFYING TOOLCHAINS"
+          echo "========================================"
+
           java -version
           flutter --version
           rustc --version
           cargo --version
           cargo ndk --version
+          protoc --version
 
+          echo ""
           echo "ANDROID_HOME=$ANDROID_HOME"
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/29.0.14206865"
+
+          test -f "$ANDROID_HOME/ndk/29.0.14206865/build/cmake/android.toolchain.cmake"
 
 
       # ========================================
