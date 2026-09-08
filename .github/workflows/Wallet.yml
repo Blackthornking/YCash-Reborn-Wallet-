@@ -95,7 +95,7 @@ jobs:
 
           while IFS= read -r PUBSPEC; do
 
-            DIR=$(dirname "$PUBSPEC")
+            DIR="$(dirname "$PUBSPEC")"
 
             echo "Checking: $DIR"
 
@@ -124,7 +124,7 @@ jobs:
           echo "FLUTTER PROJECT FOUND"
           echo "========================================"
 
-          echo "$PROJECT_DIR"
+          echo "PROJECT_DIR=$PROJECT_DIR"
 
           echo ""
           echo "PROJECT FILES:"
@@ -147,15 +147,29 @@ jobs:
 
 
       # ========================================
+      # FLUTTER
+      # ========================================
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+
+      # ========================================
       # ANDROID SDK
       # ========================================
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
+
       - name: Install Android SDK components
         run: |
           set -e
+
+          echo "ANDROID_HOME=$ANDROID_HOME"
 
           yes | sdkmanager --licenses || true
 
@@ -179,17 +193,6 @@ jobs:
           echo "NDK_HOME=$ANDROID_HOME/ndk/29.0.14206865" >> "$GITHUB_ENV"
 
           echo "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
-
-
-      # ========================================
-      # FLUTTER
-      # ========================================
-
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-          cache: true
 
 
       # ========================================
@@ -263,7 +266,8 @@ jobs:
           echo "========================================"
 
           if [ -f "android/gradlew" ] && \
-             [ -f "android/gradle/wrapper/gradle-wrapper.jar" ]; then
+             [ -f "android/gradle/wrapper/gradle-wrapper.jar" ] && \
+             [ -f "android/gradle/wrapper/gradle-wrapper.properties" ]; then
 
             echo "SUCCESS: Gradle wrapper already exists."
 
@@ -274,18 +278,17 @@ jobs:
 
           echo ""
           echo "Gradle wrapper is missing."
-          echo "Creating Gradle 8.9 wrapper..."
+          echo "Creating Gradle wrapper..."
 
-          GRADLE_VERSION="8.9"
-          TEMP_DIR=$(mktemp -d)
+          GRADLE_VERSION="9.1.0"
+          TEMP_DIR="$(mktemp -d)"
 
-          echo "Temporary directory:"
-          echo "$TEMP_DIR"
+          echo "Temporary directory: $TEMP_DIR"
 
           cd "$TEMP_DIR"
 
-          echo 'rootProject.name = "wrapper-generator"' > settings.gradle
-          echo '' > build.gradle
+          printf 'rootProject.name = "wrapper-generator"\n' > settings.gradle
+          printf '\n' > build.gradle
 
           echo ""
           echo "Downloading Gradle ${GRADLE_VERSION}..."
@@ -345,149 +348,84 @@ jobs:
 
 
       # ========================================
-      # FIX AGP 9
+      # FIX AGP 9 NEW DSL
       # ========================================
 
-      - name: Fix AGP 9 compatibility
+      - name: Fix AGP 9 Flutter compatibility
         working-directory: ${{ env.PROJECT_DIR }}
         run: |
           set -e
 
           echo "========================================"
-          echo "PATCHING AGP CONFIGURATION"
+          echo "CONFIGURING AGP 9 COMPATIBILITY"
           echo "========================================"
 
           touch android/gradle.properties
 
           echo ""
-          echo "Removing android.newDsl..."
+          echo "Removing existing android.newDsl settings..."
 
           sed -i \
             '/^[[:space:]]*android\.newDsl[[:space:]]*=/d' \
             android/gradle.properties
 
           echo ""
-          echo "Setting Gradle to 8.9..."
+          echo "Adding AGP 9 legacy DSL compatibility..."
 
-          sed -i \
-            's#^distributionUrl=.*#distributionUrl=https\://services.gradle.org/distributions/gradle-8.9-bin.zip#' \
-            android/gradle/wrapper/gradle-wrapper.properties
+          echo "android.newDsl=false" >> android/gradle.properties
 
           echo ""
-          echo "Replacing AGP 9.x with AGP 8.7.3..."
+          echo "Removing existing built-in Kotlin settings..."
 
-          python3 <<'PYTHON'
-          import os
-          import re
+          sed -i \
+            '/^[[:space:]]*android\.builtInKotlin[[:space:]]*=/d' \
+            android/gradle.properties
 
-          AGP_VERSION = "8.7.3"
+          echo ""
+          echo "Adding Kotlin compatibility setting..."
 
-          extensions = (
-              ".gradle",
-              ".gradle.kts",
-              ".toml",
-          )
+          echo "android.builtInKotlin=false" >> android/gradle.properties
 
-          for root, dirs, files in os.walk("android"):
+          echo ""
+          echo "========================================"
+          echo "FINAL gradle.properties"
+          echo "========================================"
 
-              for filename in files:
-
-                  if not filename.endswith(extensions):
-                      continue
-
-                  path = os.path.join(root, filename)
-
-                  with open(path, "r", encoding="utf-8") as f:
-                      original = f.read()
-
-                  text = original
-
-                  # Traditional buildscript dependency
-                  text = re.sub(
-                      r'com\.android\.tools\.build:gradle:9\.[0-9.]+',
-                      f'com.android.tools.build:gradle:{AGP_VERSION}',
-                      text
-                  )
-
-                  # Kotlin DSL application plugin
-                  text = re.sub(
-                      r'(id\(\s*["\']com\.android\.application["\']\s*\)\s*version\s*["\'])9\.[0-9.]+',
-                      rf'\g<1>{AGP_VERSION}',
-                      text
-                  )
-
-                  # Kotlin DSL library plugin
-                  text = re.sub(
-                      r'(id\(\s*["\']com\.android\.library["\']\s*\)\s*version\s*["\'])9\.[0-9.]+',
-                      rf'\g<1>{AGP_VERSION}',
-                      text
-                  )
-
-                  # Groovy DSL application plugin
-                  text = re.sub(
-                      r'(id\s+["\']com\.android\.application["\']\s+version\s+["\'])9\.[0-9.]+',
-                      rf'\g<1>{AGP_VERSION}',
-                      text
-                  )
-
-                  # Groovy DSL library plugin
-                  text = re.sub(
-                      r'(id\s+["\']com\.android\.library["\']\s+version\s+["\'])9\.[0-9.]+',
-                      rf'\g<1>{AGP_VERSION}',
-                      text
-                  )
-
-                  # Version catalog AGP entry
-                  text = re.sub(
-                      r'(^\s*agp\s*=\s*["\'])9\.[0-9.]+',
-                      rf'\g<1>{AGP_VERSION}',
-                      text,
-                      flags=re.MULTILINE
-                  )
-
-                  # Alternative variable
-                  text = re.sub(
-                      r'(^\s*androidGradlePlugin\s*=\s*["\'])9\.[0-9.]+',
-                      rf'\g<1>{AGP_VERSION}',
-                      text,
-                      flags=re.MULTILINE
-                  )
-
-                  if text != original:
-
-                      print(f"PATCHED: {path}")
-
-                      with open(path, "w", encoding="utf-8") as f:
-                          f.write(text)
-
-          print("")
-          print("AGP patch completed.")
-          PYTHON
+          cat android/gradle.properties
 
 
       # ========================================
-      # VERIFY AGP
+      # DETECT AGP VERSION
       # ========================================
 
-      - name: Verify Android Gradle configuration
+      - name: Show Android Gradle configuration
         working-directory: ${{ env.PROJECT_DIR }}
         run: |
           set -e
 
           echo "========================================"
-          echo "GRADLE WRAPPER CONFIGURATION"
+          echo "ANDROID GRADLE FILES"
           echo "========================================"
 
-          cat android/gradle/wrapper/gradle-wrapper.properties
+          find android \
+            -type f \
+            \( \
+              -name "*.gradle" \
+              -o -name "*.gradle.kts" \
+              -o -name "*.toml" \
+              -o -name "gradle.properties" \
+            \) \
+            -print \
+            | sort
 
           echo ""
           echo "========================================"
-          echo "ANDROID GRADLE REFERENCES"
+          echo "AGP REFERENCES"
           echo "========================================"
 
           grep -Rni \
             -E \
-            'com\.android\.application|com\.android\.library|com\.android\.tools\.build|androidGradlePlugin|agp[[:space:]]*=' \
+            'com\.android\.application|com\.android\.library|com\.android\.tools\.build|agp[[:space:]]*=|androidGradlePlugin' \
             android \
             --include="*.gradle" \
             --include="*.gradle.kts" \
@@ -495,29 +433,17 @@ jobs:
 
           echo ""
           echo "========================================"
-          echo "CHECKING FOR AGP 9"
+          echo "NEW DSL CONFIGURATION"
           echo "========================================"
 
-          if grep -Rni \
+          grep -n \
             -E \
-            '(com\.android\.application|com\.android\.library|com\.android\.tools\.build:gradle|androidGradlePlugin|agp).*9\.' \
-            android \
-            --include="*.gradle" \
-            --include="*.gradle.kts" \
-            --include="*.toml"; then
-
-            echo ""
-            echo "ERROR: AGP 9 reference still exists."
-            exit 1
-
-          fi
-
-          echo ""
-          echo "SUCCESS: No AGP 9 references found."
+            '^android\.newDsl=|^android\.builtInKotlin=' \
+            android/gradle.properties || true
 
 
       # ========================================
-      # VERIFY GRADLE
+      # VERIFY GRADLE WRAPPER
       # ========================================
 
       - name: Verify Gradle
@@ -530,7 +456,7 @@ jobs:
           echo "========================================"
 
           if [ ! -f "./gradlew" ]; then
-            echo "ERROR: gradlew was not created."
+            echo "ERROR: gradlew is missing."
             exit 1
           fi
 
