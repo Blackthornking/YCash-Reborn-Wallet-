@@ -277,10 +277,38 @@ jobs:
           fi
 
           echo ""
-          echo "Gradle wrapper is missing."
+          echo "Gradle wrapper is missing (gradlew / gradle-wrapper.jar were not committed)."
           echo "Creating Gradle wrapper..."
 
-          GRADLE_VERSION="9.1.0"
+          # IMPORTANT: this version must match what this project's AGP version
+          # (pinned in android/settings.gradle.kts) actually supports. Previously
+          # this was hardcoded to "9.1.0", which silently overwrote the project's
+          # correct Gradle 8.9 pin (matching AGP 8.7.3) with an incompatible
+          # Gradle 9.1.0 - Gradle 9.x expects AGP 9+, and running it against
+          # AGP 8.7.3 is what produced the "Starting AGP 9+, only the new DSL
+          # interface will be read" failure, even with android.newDsl=false set,
+          # because the mismatch was in the Gradle/AGP pairing, not the DSL flag.
+          #
+          # Instead, read the version this project already declares in its
+          # (committed) gradle-wrapper.properties, if present, and only fall
+          # back to a hardcoded default when that file is missing too.
+          GRADLE_VERSION="8.9"
+
+          if [ -f "android/gradle/wrapper/gradle-wrapper.properties" ]; then
+            DETECTED_VERSION="$(
+              grep -oE 'gradle-[0-9]+\.[0-9]+(\.[0-9]+)?' \
+                android/gradle/wrapper/gradle-wrapper.properties \
+                | head -n1 \
+                | sed 's/^gradle-//'
+            )"
+
+            if [ -n "$DETECTED_VERSION" ]; then
+              GRADLE_VERSION="$DETECTED_VERSION"
+            fi
+          fi
+
+          echo "Using Gradle ${GRADLE_VERSION} (matches this project's declared/pinned AGP version)."
+
           TEMP_DIR="$(mktemp -d)"
 
           echo "Temporary directory: $TEMP_DIR"
