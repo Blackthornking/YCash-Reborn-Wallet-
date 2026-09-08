@@ -277,24 +277,13 @@ jobs:
           fi
 
           echo ""
-          echo "Gradle wrapper is missing (gradlew / gradle-wrapper.jar were not committed)."
+          echo "Gradle wrapper is missing."
           echo "Creating Gradle wrapper..."
 
-          # IMPORTANT: this version must match what this project's AGP version
-          # (pinned in android/settings.gradle.kts) actually supports. Previously
-          # this was hardcoded to "9.1.0", which silently overwrote the project's
-          # correct Gradle 8.9 pin (matching AGP 8.7.3) with an incompatible
-          # Gradle 9.1.0 - Gradle 9.x expects AGP 9+, and running it against
-          # AGP 8.7.3 is what produced the "Starting AGP 9+, only the new DSL
-          # interface will be read" failure, even with android.newDsl=false set,
-          # because the mismatch was in the Gradle/AGP pairing, not the DSL flag.
-          #
-          # Instead, read the version this project already declares in its
-          # (committed) gradle-wrapper.properties, if present, and only fall
-          # back to a hardcoded default when that file is missing too.
-          GRADLE_VERSION="8.9"
+          GRADLE_VERSION="8.14.3"
 
           if [ -f "android/gradle/wrapper/gradle-wrapper.properties" ]; then
+
             DETECTED_VERSION="$(
               grep -oE 'gradle-[0-9]+\.[0-9]+(\.[0-9]+)?' \
                 android/gradle/wrapper/gradle-wrapper.properties \
@@ -307,7 +296,7 @@ jobs:
             fi
           fi
 
-          echo "Using Gradle ${GRADLE_VERSION} (matches this project's declared/pinned AGP version)."
+          echo "Using Gradle ${GRADLE_VERSION}"
 
           TEMP_DIR="$(mktemp -d)"
 
@@ -318,7 +307,6 @@ jobs:
           printf 'rootProject.name = "wrapper-generator"\n' > settings.gradle
           printf '\n' > build.gradle
 
-          echo ""
           echo "Downloading Gradle ${GRADLE_VERSION}..."
 
           curl \
@@ -328,13 +316,11 @@ jobs:
             --output "gradle-${GRADLE_VERSION}-bin.zip" \
             "https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip"
 
-          echo ""
           echo "Extracting Gradle..."
 
           unzip -q \
             "gradle-${GRADLE_VERSION}-bin.zip"
 
-          echo ""
           echo "Generating Gradle wrapper..."
 
           "./gradle-${GRADLE_VERSION}/bin/gradle" \
@@ -343,7 +329,6 @@ jobs:
             --distribution-type bin \
             --no-daemon
 
-          echo ""
           echo "Copying Gradle wrapper to Android project..."
 
           mkdir -p "${PROJECT_DIR}/android/gradle/wrapper"
@@ -376,54 +361,7 @@ jobs:
 
 
       # ========================================
-      # FIX AGP 9 NEW DSL
-      # ========================================
-
-      - name: Fix AGP 9 Flutter compatibility
-        working-directory: ${{ env.PROJECT_DIR }}
-        run: |
-          set -e
-
-          echo "========================================"
-          echo "CONFIGURING AGP 9 COMPATIBILITY"
-          echo "========================================"
-
-          touch android/gradle.properties
-
-          echo ""
-          echo "Removing existing android.newDsl settings..."
-
-          sed -i \
-            '/^[[:space:]]*android\.newDsl[[:space:]]*=/d' \
-            android/gradle.properties
-
-          echo ""
-          echo "Adding AGP 9 legacy DSL compatibility..."
-
-          echo "android.newDsl=false" >> android/gradle.properties
-
-          echo ""
-          echo "Removing existing built-in Kotlin settings..."
-
-          sed -i \
-            '/^[[:space:]]*android\.builtInKotlin[[:space:]]*=/d' \
-            android/gradle.properties
-
-          echo ""
-          echo "Adding Kotlin compatibility setting..."
-
-          echo "android.builtInKotlin=false" >> android/gradle.properties
-
-          echo ""
-          echo "========================================"
-          echo "FINAL gradle.properties"
-          echo "========================================"
-
-          cat android/gradle.properties
-
-
-      # ========================================
-      # DETECT AGP VERSION
+      # SHOW ANDROID GRADLE CONFIGURATION
       # ========================================
 
       - name: Show Android Gradle configuration
@@ -437,12 +375,12 @@ jobs:
 
           find android \
             -type f \
-            \( \
+            \
               -name "*.gradle" \
               -o -name "*.gradle.kts" \
               -o -name "*.toml" \
               -o -name "gradle.properties" \
-            \) \
+            \
             -print \
             | sort
 
@@ -458,16 +396,6 @@ jobs:
             --include="*.gradle" \
             --include="*.gradle.kts" \
             --include="*.toml" || true
-
-          echo ""
-          echo "========================================"
-          echo "NEW DSL CONFIGURATION"
-          echo "========================================"
-
-          grep -n \
-            -E \
-            '^android\.newDsl=|^android\.builtInKotlin=' \
-            android/gradle.properties || true
 
 
       # ========================================
@@ -567,11 +495,4 @@ jobs:
       # ========================================
 
       - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: Ycash-Wallet-Release-APK
-          path: |
-            ${{ env.PROJECT_DIR }}/build/app/outputs/flutter-apk/*.apk
-            ${{ env.PROJECT_DIR }}/build/app/outputs/apk/release/*.apk
-          if-no-files-found: error
-          retention-days: 30
+        uses: actions/upload-artifact
