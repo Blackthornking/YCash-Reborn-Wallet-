@@ -198,24 +198,56 @@ jobs:
 
           touch "$GRADLE_PROPERTIES"
 
-          echo "=== Current gradle.properties ==="
-          cat "$GRADLE_PROPERTIES"
+          echo "=== Removing existing android.newDsl settings ==="
+          sed -i '/^[[:space:]]*android\.newDsl[[:space:]]*=/d' "$GRADLE_PROPERTIES"
 
-          if grep -q '^android.newDsl=' "$GRADLE_PROPERTIES"; then
-            sed -i 's/^android\.newDsl=.*/android.newDsl=false/' "$GRADLE_PROPERTIES"
-          else
-            echo "android.newDsl=false" >> "$GRADLE_PROPERTIES"
-          fi
+          echo "android.newDsl=false" >> "$GRADLE_PROPERTIES"
 
           echo ""
-          echo "=== Updated gradle.properties ==="
+          echo "=== Final gradle.properties ==="
           cat "$GRADLE_PROPERTIES"
+
+          echo ""
+          echo "=== Verifying AGP compatibility setting ==="
+          grep '^android.newDsl=false$' "$GRADLE_PROPERTIES"
+
+      - name: Clean Flutter and Gradle caches
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          set -e
+
+          flutter clean
+
+          rm -rf android/.gradle
+          rm -rf .gradle
+
+          flutter pub get
 
       - name: Build Flutter APK
         working-directory: ${{ env.PROJECT_DIR }}
         run: |
-          flutter build apk --release --verbose
+          flutter build apk \
+            --release \
+            --verbose
 
+      - name: Show generated APK files
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          echo "Generated APK files:"
+
+          find build/app/outputs/flutter-apk \
+            -type f \
+            -name "*.apk" \
+            -print \
+            -exec ls -lh {} \;
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Ycash-Wallet-Release-APK
+          path: ${{ env.PROJECT_DIR }}/build/app/outputs/flutter-apk/*.apk
+          if-no-files-found: error
+          retention-days: 30
       - name: Show generated APK files
         working-directory: ${{ env.PROJECT_DIR }}
         run: |
