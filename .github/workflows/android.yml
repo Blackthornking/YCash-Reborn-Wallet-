@@ -18,18 +18,8 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-
-      # ========================================
-      # CHECKOUT REPOSITORY
-      # ========================================
-
       - name: Checkout repository
         uses: actions/checkout@v4
-
-
-      # ========================================
-      # SHOW REPOSITORY CONTENTS
-      # ========================================
 
       - name: Show repository contents
         shell: bash
@@ -37,17 +27,11 @@ jobs:
           echo "Repository files:"
           find "$GITHUB_WORKSPACE" -maxdepth 3 -type f | sort
 
-
-      # ========================================
-      # FIND AND EXTRACT PROJECT ZIP
-      # ========================================
-
-      - name: Extract Flutter project
+      - name: Find project ZIP
+        id: zip
         shell: bash
         run: |
           set -euo pipefail
-
-          echo "Searching for ZIP files in repository root..."
 
           ZIP_FILE=$(find "$GITHUB_WORKSPACE" \
             -maxdepth 1 \
@@ -57,26 +41,27 @@ jobs:
             | head -n 1)
 
           if [ -z "$ZIP_FILE" ]; then
-            echo "ERROR: No project ZIP file found in repository root."
+            echo "ERROR: No ZIP file found in repository root."
             exit 1
           fi
 
-          echo "Found ZIP:"
-          echo "$ZIP_FILE"
+          echo "Found project ZIP: $ZIP_FILE"
+          echo "path=$ZIP_FILE" >> "$GITHUB_OUTPUT"
 
-          rm -rf "$GITHUB_WORKSPACE/project"
-          mkdir -p "$GITHUB_WORKSPACE/project"
+      - name: Extract Flutter project
+        shell: bash
+        run: |
+          set -euo pipefail
 
-          unzip -q "$ZIP_FILE" -d "$GITHUB_WORKSPACE/project"
+          PROJECT_DIR="$GITHUB_WORKSPACE/project"
 
-          echo ""
-          echo "Top-level extracted files:"
-          ls -la "$GITHUB_WORKSPACE/project"
+          rm -rf "$PROJECT_DIR"
+          mkdir -p "$PROJECT_DIR"
 
+          unzip -q "${{ steps.zip.outputs.path }}" -d "$PROJECT_DIR"
 
-      # ========================================
-      # VERIFY FLUTTER PROJECT
-      # ========================================
+          echo "Extracted project:"
+          ls -la "$PROJECT_DIR"
 
       - name: Verify Flutter project
         id: project
@@ -86,32 +71,15 @@ jobs:
 
           PROJECT_DIR="$GITHUB_WORKSPACE/project"
 
-          echo "Checking Flutter project:"
-          echo "$PROJECT_DIR"
-
           if [ ! -f "$PROJECT_DIR/pubspec.yaml" ]; then
-            echo "ERROR: pubspec.yaml not found at project root."
-
-            echo ""
-            echo "Extracted contents:"
+            echo "ERROR: pubspec.yaml not found."
+            echo "Project contents:"
             find "$PROJECT_DIR" -maxdepth 3 -type f | sort | head -n 300
-
             exit 1
           fi
 
-          echo ""
           echo "Flutter project verified."
-          echo ""
-
-          echo "pubspec.yaml:"
-          head -n 40 "$PROJECT_DIR/pubspec.yaml"
-
           echo "path=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
-
-
-      # ========================================
-      # JAVA 17
-      # ========================================
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
@@ -120,14 +88,8 @@ jobs:
           java-version: "17"
           cache: gradle
 
-
-      # ========================================
-      # ANDROID SDK
-      # ========================================
-
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
-
 
       - name: Install Android SDK and NDK
         shell: bash
@@ -136,26 +98,16 @@ jobs:
 
           sdkmanager \
             "platform-tools" \
-            "platforms;android-35" \
-            "build-tools;35.0.0" \
+            "platforms;android-36" \
+            "build-tools;36.0.0" \
             "ndk;27.0.12077973" \
             "cmake;3.22.1"
 
-
-      # ========================================
-      # CONFIGURE ANDROID ENVIRONMENT
-      # ========================================
-
-      - name: Configure Android environment
+      - name: Configure Android NDK
         shell: bash
         run: |
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.0.12077973" >> "$GITHUB_ENV"
           echo "ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/27.0.12077973" >> "$GITHUB_ENV"
-
-
-      # ========================================
-      # FLUTTER
-      # ========================================
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
@@ -164,27 +116,16 @@ jobs:
           channel: stable
           cache: true
 
-
-      # ========================================
-      # SYSTEM DEPENDENCIES
-      # ========================================
-
-      - name: Install native build dependencies
+      - name: Install system dependencies
         shell: bash
         run: |
           sudo apt-get update
-
           sudo apt-get install -y \
+            unzip \
             protobuf-compiler \
             clang \
             pkg-config \
-            libssl-dev \
-            unzip
-
-
-      # ========================================
-      # RUST
-      # ========================================
+            libssl-dev
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
@@ -194,20 +135,10 @@ jobs:
             armv7-linux-androideabi
             x86_64-linux-android
 
-
-      # ========================================
-      # CARGO-NDK
-      # ========================================
-
       - name: Install cargo-ndk
         shell: bash
         run: |
           cargo install cargo-ndk --locked
-
-
-      # ========================================
-      # VERIFY TOOLCHAIN
-      # ========================================
 
       - name: Verify toolchain
         shell: bash
@@ -218,46 +149,28 @@ jobs:
           cargo --version
           cargo ndk --version
 
-          echo ""
           echo "ANDROID_HOME=$ANDROID_HOME"
           echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME"
 
-          echo ""
-          echo "Checking Android SDK 35:"
-          ls "$ANDROID_HOME/platforms/android-35"
+          echo "Android SDK 36:"
+          ls "$ANDROID_HOME/platforms/android-36"
 
-          echo ""
-          echo "Checking Android NDK:"
+          echo "Android NDK:"
           ls "$ANDROID_NDK_HOME"
 
-
-      # ========================================
-      # SHOW PROJECT STRUCTURE
-      # ========================================
-
-      - name: Show Flutter project structure
+      - name: Show project structure
         working-directory: ${{ steps.project.outputs.path }}
         shell: bash
         run: |
-          echo "Current directory:"
           pwd
-
-          echo ""
-          echo "Project files:"
+          echo "Top-level files:"
           ls -la
 
-          echo ""
           echo "Android directory:"
-          ls -la android
+          ls -la android || true
 
-          echo ""
-          echo "Cargo.toml files:"
-          find . -name "Cargo.toml" -type f -print
-
-
-      # ========================================
-      # FLUTTER DEPENDENCIES
-      # ========================================
+          echo "Rust Cargo.toml files:"
+          find . -type f -name "Cargo.toml" -print
 
       - name: Get Flutter packages
         working-directory: ${{ steps.project.outputs.path }}
@@ -266,20 +179,11 @@ jobs:
           flutter clean
           flutter pub get
 
-
-      # ========================================
-      # ANALYZE
-      # ========================================
-
-            - name: Analyze Dart source
+      - name: Analyze Dart source
         working-directory: ${{ steps.project.outputs.path }}
         shell: bash
         run: |
           flutter analyze || true
-
-      # ========================================
-      # BUILD RELEASE APK
-      # ========================================
 
       - name: Build release APK
         working-directory: ${{ steps.project.outputs.path }}
@@ -287,17 +191,11 @@ jobs:
         run: |
           flutter build apk --release --verbose
 
-
-      # ========================================
-      # FIND GENERATED APK
-      # ========================================
-
       - name: Find generated APK
+        id: apk
         shell: bash
         run: |
           set -euo pipefail
-
-          echo "Searching for generated release APK..."
 
           APK_FILE=$(find "$GITHUB_WORKSPACE/project" \
             -type f \
@@ -307,34 +205,27 @@ jobs:
 
           if [ -z "$APK_FILE" ]; then
             echo "ERROR: app-release.apk was not found."
-
-            echo ""
-            echo "APK files found:"
             find "$GITHUB_WORKSPACE/project" \
               -type f \
               -name "*.apk" \
               -print || true
-
             exit 1
           fi
 
-          echo ""
-          echo "APK found:"
-          echo "$APK_FILE"
+          echo "APK found: $APK_FILE"
+          echo "path=$APK_FILE" >> "$GITHUB_OUTPUT"
+
+      - name: Prepare final APK
+        shell: bash
+        run: |
+          set -euo pipefail
 
           mkdir -p "$GITHUB_WORKSPACE/release"
 
-          cp "$APK_FILE" \
+          cp "${{ steps.apk.outputs.path }}" \
             "$GITHUB_WORKSPACE/release/Ycash-Reborn.apk"
 
-          echo ""
-          echo "Final APK:"
           ls -lh "$GITHUB_WORKSPACE/release/Ycash-Reborn.apk"
-
-
-      # ========================================
-      # UPLOAD APK
-      # ========================================
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
