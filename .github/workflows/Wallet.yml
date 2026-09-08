@@ -50,7 +50,8 @@ jobs:
 
           echo ""
           echo "Extracted project files:"
-          find extracted_project -maxdepth 8 \
+
+          find extracted_project -maxdepth 10 \
             -type f \
             \( \
               -name "pubspec.yaml" \
@@ -58,6 +59,7 @@ jobs:
               -o -name "settings.gradle.kts" \
               -o -name "build.gradle" \
               -o -name "build.gradle.kts" \
+              -o -name "libs.versions.toml" \
             \) \
             -print
 
@@ -169,28 +171,16 @@ jobs:
 
           echo ""
           echo "=== Android Gradle files ==="
-          find android -maxdepth 4 \
-            -type f \
+
+          find android -type f \
             \( \
               -name "*.gradle" \
               -o -name "*.gradle.kts" \
+              -o -name "*.toml" \
               -o -name "gradle.properties" \
               -o -name "gradle-wrapper.properties" \
             \) \
             -print
-
-          echo ""
-          echo "=== Rust project ==="
-
-          if [ -d "packages/ycash_core_ffi/rust" ]; then
-            find packages/ycash_core_ffi/rust \
-              -maxdepth 2 \
-              -type f \
-              \( -name "Cargo.toml" -o -name "Cargo.lock" \) \
-              -print
-          else
-            echo "Rust directory not found at expected path."
-          fi
 
       - name: Fix AGP 9 incompatibility
         working-directory: ${{ env.PROJECT_DIR }}
@@ -198,140 +188,194 @@ jobs:
           set -e
 
           echo "========================================"
-          echo "Checking current Android Gradle versions"
+          echo "ANDROID GRADLE CONFIGURATION BEFORE PATCH"
           echo "========================================"
 
           echo ""
-          echo "--- Gradle files before patch ---"
+          echo "--- All AGP / Android plugin references ---"
 
-          grep -R \
-            -n \
+          grep -Rni \
             -E \
-            'com\.android\.application|com\.android\.library|com\.android\.tools\.build:gradle|androidGradlePlugin' \
+            'com\.android\.application|com\.android\.library|com\.android\.tools\.build|androidGradlePlugin|agp[[:space:]]*=|agp[[:space:]]*=' \
             android \
             --include="*.gradle" \
             --include="*.gradle.kts" \
             --include="*.toml" || true
 
           echo ""
-          echo "--- Gradle wrapper before patch ---"
+          echo "--- All 9.x references in Android configuration ---"
 
-          cat android/gradle/wrapper/gradle-wrapper.properties || true
+          grep -Rni \
+            -E \
+            '9\.[0-9]+' \
+            android \
+            --include="*.gradle" \
+            --include="*.gradle.kts" \
+            --include="*.toml" || true
 
           echo ""
           echo "========================================"
-          echo "Removing AGP 9 newDsl configuration"
+          echo "REMOVING android.newDsl"
           echo "========================================"
 
-          GRADLE_PROPERTIES="android/gradle.properties"
-
-          touch "$GRADLE_PROPERTIES"
+          touch android/gradle.properties
 
           sed -i \
             '/^[[:space:]]*android\.newDsl[[:space:]]*=/d' \
-            "$GRADLE_PROPERTIES"
+            android/gradle.properties
 
           echo ""
           echo "========================================"
-          echo "Setting Gradle version to 8.10.2"
+          echo "SETTING GRADLE TO 8.10.2"
           echo "========================================"
 
           if [ -f "android/gradle/wrapper/gradle-wrapper.properties" ]; then
             sed -i \
-              's#distributionUrl=.*#distributionUrl=https\\://services.gradle.org/distributions/gradle-8.10.2-bin.zip#' \
+              's#^distributionUrl=.*#distributionUrl=https\://services.gradle.org/distributions/gradle-8.10.2-bin.zip#' \
               android/gradle/wrapper/gradle-wrapper.properties
           fi
 
           echo ""
           echo "========================================"
-          echo "Replacing AGP 9 with AGP 8.8.2"
+          echo "REPLACING AGP 9 WITH AGP 8.8.2"
           echo "========================================"
 
-          find android \
-            -type f \
-            \( \
-              -name "*.gradle" \
-              -o -name "*.gradle.kts" \
-              -o -name "*.toml" \
-            \) \
-            -print0 | while IFS= read -r -d '' file; do
+          python3 <<'PYTHON'
+          import os
+          import re
 
-              echo "Checking: $file"
+          AGP_VERSION = "8.8.2"
 
-              sed -i -E \
-                's/com\.android\.tools\.build:gradle:9\.[0-9.]+/com.android.tools.build:gradle:8.8.2/g' \
-                "$file"
+          extensions = (
+              ".gradle",
+              ".gradle.kts",
+              ".toml",
+          )
 
-              sed -i -E \
-                's/(com\.android\.application[[:space:]]*=[[:space:]]*")[^"]*9\.[0-9.]+/\18.8.2/g' \
-                "$file"
+          files = []
 
-              sed -i -E \
-                's/(com\.android\.library[[:space:]]*=[[:space:]]*")[^"]*9\.[0-9.]+/\18.8.2/g' \
-                "$file"
+          for root, dirs, filenames in os.walk("android"):
+              for filename in filenames:
+                  if filename.endswith(extensions):
+                      files.append(os.path.join(root, filename))
 
-              sed -i -E \
-                's/(id\(["'\'']com\.android\.application["'\'']\)[[:space:]]+version[[:space:]]+["'\''])9\.[0-9.]+/\18.8.2/g' \
-                "$file"
+          print("Files being checked:")
+          for path in files:
+              print(" -", path)
 
-              sed -i -E \
-                's/(id\(["'\'']com\.android\.library["'\'']\)[[:space:]]+version[[:space:]]+["'\''])9\.[0-9.]+/\18.8.2/g' \
-                "$file"
+          for path in files:
+              with open(path, "r", encoding="utf-8") as f:
+                  original = f.read()
 
-              sed -i -E \
-                's/(id[[:space:]]+["'\'']com\.android\.application["'\''][[:space:]]+version[[:space:]]+["'\''])9\.[0-9.]+/\18.8.2/g' \
-                "$file"
+              text = original
 
-              sed -i -E \
-                's/(id[[:space:]]+["'\'']com\.android\.library["'\''][[:space:]]+version[[:space:]]+["'\''])9\.[0-9.]+/\18.8.2/g' \
-                "$file"
+              # Groovy classpath format:
+              # com.android.tools.build:gradle:9.x.x
+              text = re.sub(
+                  r'com\.android\.tools\.build:gradle:9\.[0-9.]+',
+                  f'com.android.tools.build:gradle:{AGP_VERSION}',
+                  text
+              )
 
-            done
+              # Kotlin DSL:
+              # id("com.android.application") version "9.x.x"
+              text = re.sub(
+                  r'(id\(\s*["\']com\.android\.application["\']\s*\)\s*version\s*["\'])9\.[0-9.]+',
+                  rf'\g<1>{AGP_VERSION}',
+                  text
+              )
+
+              text = re.sub(
+                  r'(id\(\s*["\']com\.android\.library["\']\s*\)\s*version\s*["\'])9\.[0-9.]+',
+                  rf'\g<1>{AGP_VERSION}',
+                  text
+              )
+
+              # Groovy plugins:
+              # id 'com.android.application' version '9.x.x'
+              text = re.sub(
+                  r'(id\s+["\']com\.android\.application["\']\s+version\s+["\'])9\.[0-9.]+',
+                  rf'\g<1>{AGP_VERSION}',
+                  text
+              )
+
+              text = re.sub(
+                  r'(id\s+["\']com\.android\.library["\']\s+version\s+["\'])9\.[0-9.]+',
+                  rf'\g<1>{AGP_VERSION}',
+                  text
+              )
+
+              # Version catalog:
+              # agp = "9.x.x"
+              text = re.sub(
+                  r'(^\s*agp\s*=\s*["\'])9\.[0-9.]+',
+                  rf'\g<1>{AGP_VERSION}',
+                  text,
+                  flags=re.MULTILINE
+              )
+
+              # androidGradlePlugin = "9.x.x"
+              text = re.sub(
+                  r'(^\s*androidGradlePlugin\s*=\s*["\'])9\.[0-9.]+',
+                  rf'\g<1>{AGP_VERSION}',
+                  text,
+                  flags=re.MULTILINE
+              )
+
+              if text != original:
+                  print(f"PATCHED: {path}")
+
+                  with open(path, "w", encoding="utf-8") as f:
+                      f.write(text)
+
+          print("")
+          print("AGP patch completed.")
+          PYTHON
 
           echo ""
           echo "========================================"
-          echo "Final Android Gradle configuration"
+          echo "ANDROID GRADLE CONFIGURATION AFTER PATCH"
           echo "========================================"
 
           echo ""
           echo "--- gradle.properties ---"
-          cat "$GRADLE_PROPERTIES"
+          cat android/gradle.properties || true
 
           echo ""
           echo "--- gradle-wrapper.properties ---"
           cat android/gradle/wrapper/gradle-wrapper.properties || true
 
           echo ""
-          echo "--- AGP references after patch ---"
+          echo "--- Final Android plugin references ---"
 
-          grep -R \
-            -n \
+          grep -Rni \
             -E \
-            'com\.android\.application|com\.android\.library|com\.android\.tools\.build:gradle|androidGradlePlugin' \
+            'com\.android\.application|com\.android\.library|com\.android\.tools\.build|androidGradlePlugin|agp[[:space:]]*=' \
             android \
             --include="*.gradle" \
             --include="*.gradle.kts" \
             --include="*.toml" || true
 
           echo ""
-          echo "--- Checking for remaining AGP 9 references ---"
+          echo "========================================"
+          echo "CHECKING FOR REMAINING AGP 9 REFERENCES"
+          echo "========================================"
 
-          if grep -R \
-            -n \
+          if grep -Rni \
             -E \
-            '(com\.android\.application|com\.android\.library).*9\.|com\.android\.tools\.build:gradle:9\.' \
+            '(com\.android\.application|com\.android\.library|com\.android\.tools\.build:gradle|androidGradlePlugin|agp).*9\.' \
             android \
             --include="*.gradle" \
             --include="*.gradle.kts" \
             --include="*.toml"; then
 
             echo ""
-            echo "ERROR: AGP 9 references are still present."
+            echo "ERROR: AGP 9 reference still exists."
             exit 1
           fi
 
           echo ""
-          echo "AGP compatibility patch completed successfully."
+          echo "SUCCESS: No AGP 9 references detected."
 
       - name: Clean Flutter and Gradle caches
         working-directory: ${{ env.PROJECT_DIR }}
@@ -344,6 +388,13 @@ jobs:
           rm -rf .gradle
 
           flutter pub get
+
+      - name: Verify Gradle version
+        working-directory: ${{ env.PROJECT_DIR }}/android
+        run: |
+          chmod +x gradlew
+
+          ./gradlew --version
 
       - name: Build Flutter APK
         working-directory: ${{ env.PROJECT_DIR }}
