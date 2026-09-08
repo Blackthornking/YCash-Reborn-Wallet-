@@ -1,816 +1,800 @@
 name: Build Android APK
 
-on:
-workflow_dispatch:
+"on":
+  workflow_dispatch:
 
-push:
-branches:
-- main
+  push:
+    branches:
+      - main
 
-pull_request:
+  pull_request:
 
 permissions:
-contents: read
+  contents: read
 
 jobs:
-build:
-name: Build Android APK
-runs-on: ubuntu-latest
+  build:
+    name: Build Android APK
+    runs-on: ubuntu-latest
 
-steps:
+    steps:
 
-  # ========================================
-  # CHECKOUT REPOSITORY
-  # ========================================
+      # ========================================
+      # CHECKOUT REPOSITORY
+      # ========================================
 
-  - name: Checkout repository
-    uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
 
-  # ========================================
-  # FIND PROJECT ZIP
-  # ========================================
+      # ========================================
+      # FIND PROJECT ZIP
+      # ========================================
 
-  - name: Find wallet project ZIP
-    shell: bash
-    run: |
-      set -e
+      - name: Find wallet project ZIP
+        shell: bash
+        run: |
+          set -e
 
-      echo "========================================"
-      echo "REPOSITORY CONTENTS"
-      echo "========================================"
+          echo "========================================"
+          echo "REPOSITORY CONTENTS"
+          echo "========================================"
 
-      ls -lah
+          ls -lah
 
-      ZIP_FILE=""
+          ZIP_FILE=""
 
-      for FILE in \
-        "ycashwalletone.zip" \
-        "ycashwallet_fixed_agp8111.zip" \
-        "ycashwallet-fixed.zip" \
-        "ycashwallet.zip" \
-        "ycash_compatible.zip"
-      do
-        if [ -f "$FILE" ]; then
-          ZIP_FILE="$FILE"
-          break
-        fi
-      done
+          for FILE in \
+            "ycashwalletone.zip" \
+            "ycashwallet_fixed_agp8111.zip" \
+            "ycashwallet-fixed.zip" \
+            "ycashwallet.zip" \
+            "ycash_compatible.zip"
+          do
+            if [ -f "$FILE" ]; then
+              ZIP_FILE="$FILE"
+              break
+            fi
+          done
 
-      if [ -z "$ZIP_FILE" ]; then
-        echo ""
-        echo "ERROR: No supported wallet project ZIP found."
-        echo ""
-        echo "Available files:"
-        find . -maxdepth 2 -type f -print
-        exit 1
-      fi
+          if [ -z "$ZIP_FILE" ]; then
+            echo ""
+            echo "ERROR: No supported wallet project ZIP found."
+            echo ""
+            echo "Available files:"
+            find . -maxdepth 3 -type f -print
+            exit 1
+          fi
 
-      echo "ZIP_FILE=$ZIP_FILE" >> "$GITHUB_ENV"
+          echo "ZIP_FILE=$ZIP_FILE" >> "$GITHUB_ENV"
 
-      echo ""
-      echo "SUCCESS: Found project ZIP:"
-      echo "$ZIP_FILE"
+          echo ""
+          echo "SUCCESS: Found project ZIP:"
+          echo "$ZIP_FILE"
 
 
-  # ========================================
-  # EXTRACT PROJECT ZIP
-  # ========================================
+      # ========================================
+      # EXTRACT PROJECT ZIP
+      # ========================================
 
-  - name: Extract project ZIP
-    shell: bash
-    run: |
-      set -e
+      - name: Extract project ZIP
+        shell: bash
+        run: |
+          set -e
 
-      rm -rf extracted_project
-      mkdir -p extracted_project
+          rm -rf extracted_project
+          mkdir -p extracted_project
 
-      echo "========================================"
-      echo "EXTRACTING PROJECT"
-      echo "========================================"
+          echo "========================================"
+          echo "EXTRACTING PROJECT"
+          echo "========================================"
 
-      echo "ZIP_FILE=$ZIP_FILE"
+          echo "ZIP_FILE=$ZIP_FILE"
 
-      unzip -q "$ZIP_FILE" -d extracted_project
+          unzip -q "$ZIP_FILE" -d extracted_project
 
-      echo ""
-      echo "Extraction complete."
+          echo ""
+          echo "Extraction complete."
 
-      echo ""
-      echo "Searching for pubspec.yaml files..."
+          echo ""
+          echo "Searching for pubspec.yaml files..."
 
-      find extracted_project \
-        -type f \
-        -name "pubspec.yaml" \
-        -print
+          find extracted_project \
+            -type f \
+            -name "pubspec.yaml" \
+            -print
 
 
-  # ========================================
-  # LOCATE FLUTTER PROJECT
-  # ========================================
+      # ========================================
+      # LOCATE FLUTTER PROJECT
+      # ========================================
 
-  - name: Locate Flutter project
-    shell: bash
-    run: |
-      set -e
+      - name: Locate Flutter project
+        shell: bash
+        run: |
+          set -e
 
-      SEARCH_ROOT="$GITHUB_WORKSPACE/extracted_project"
-      PROJECT_DIR=""
+          SEARCH_ROOT="$GITHUB_WORKSPACE/extracted_project"
+          PROJECT_DIR=""
 
-      echo "========================================"
-      echo "LOCATING FLUTTER PROJECT"
-      echo "========================================"
+          echo "========================================"
+          echo "LOCATING FLUTTER PROJECT"
+          echo "========================================"
 
-      while IFS= read -r PUBSPEC; do
+          while IFS= read -r PUBSPEC; do
 
-        DIR="$(dirname "$PUBSPEC")"
+            DIR="$(dirname "$PUBSPEC")"
 
-        echo "Checking: $DIR"
+            echo "Checking: $DIR"
 
-        if [ -d "$DIR/android" ] && [ -d "$DIR/lib" ]; then
-          PROJECT_DIR="$DIR"
-          break
-        fi
+            if [ -d "$DIR/android" ] && [ -d "$DIR/lib" ]; then
+              PROJECT_DIR="$DIR"
+              break
+            fi
 
-      done < <(
-        find "$SEARCH_ROOT" \
-          -type f \
-          -name "pubspec.yaml" \
-          ! -path "*/.dart_tool/*" \
-          ! -path "*/build/*"
-      )
+          done < <(
+            find "$SEARCH_ROOT" \
+              -type f \
+              -name "pubspec.yaml" \
+              ! -path "*/.dart_tool/*" \
+              ! -path "*/build/*"
+          )
 
-      if [ -z "$PROJECT_DIR" ]; then
+          if [ -z "$PROJECT_DIR" ]; then
+            echo ""
+            echo "ERROR: Could not locate a Flutter project."
+            echo ""
+            echo "Directory structure:"
 
-        echo ""
-        echo "ERROR: Could not locate a Flutter project."
+            find "$SEARCH_ROOT" \
+              -maxdepth 6 \
+              -type d \
+              -print
 
-        echo ""
-        echo "Directory structure:"
+            exit 1
+          fi
 
-        find "$SEARCH_ROOT" \
-          -maxdepth 5 \
-          -type d \
-          -print
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
-        exit 1
-      fi
+          echo ""
+          echo "SUCCESS: Flutter project found."
+          echo "PROJECT_DIR=$PROJECT_DIR"
 
-      echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
-      echo ""
-      echo "SUCCESS: Flutter project found."
-      echo "PROJECT_DIR=$PROJECT_DIR"
+      # ========================================
+      # SET UP JAVA
+      # ========================================
 
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
 
-  # ========================================
-  # SET UP JAVA
-  # ========================================
 
-  - name: Set up Java 17
-    uses: actions/setup-java@v4
-    with:
-      distribution: temurin
-      java-version: "17"
-      cache: gradle
+      # ========================================
+      # SET UP FLUTTER
+      # ========================================
 
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
 
-  # ========================================
-  # SET UP FLUTTER
-  # ========================================
 
-  - name: Set up Flutter
-    uses: subosito/flutter-action@v2
-    with:
-      channel: stable
-      cache: true
+      # ========================================
+      # SET UP RUST
+      # ========================================
 
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
 
-  # ========================================
-  # SET UP RUST
-  # ========================================
 
-  - name: Set up Rust
-    uses: dtolnay/rust-toolchain@stable
+      # ========================================
+      # INSTALL RUST ANDROID TARGETS
+      # ========================================
 
+      - name: Install Rust Android targets
+        shell: bash
+        run: |
+          set -e
 
-  # ========================================
-  # INSTALL RUST ANDROID TARGETS
-  # ========================================
+          echo "========================================"
+          echo "INSTALLING RUST ANDROID TARGETS"
+          echo "========================================"
 
-  - name: Install Rust Android targets
-    shell: bash
-    run: |
-      set -e
+          rustc --version
+          cargo --version
 
-      echo "========================================"
-      echo "INSTALLING RUST ANDROID TARGETS"
-      echo "========================================"
+          rustup target add \
+            aarch64-linux-android \
+            armv7-linux-androideabi \
+            x86_64-linux-android
 
-      rustc --version
-      cargo --version
+          echo ""
+          echo "Installed Rust targets:"
+          rustup target list --installed
 
-      rustup target add \
-        aarch64-linux-android \
-        armv7-linux-androideabi \
-        x86_64-linux-android
 
-      echo ""
-      echo "Installed Rust targets:"
+      # ========================================
+      # INSTALL CARGO-NDK
+      # ========================================
 
-      rustup target list --installed
+      - name: Install cargo-ndk
+        shell: bash
+        run: |
+          set -e
 
+          echo "========================================"
+          echo "INSTALLING CARGO-NDK"
+          echo "========================================"
 
-  # ========================================
-  # INSTALL CARGO-NDK
-  # ========================================
+          cargo install cargo-ndk --locked
 
-  - name: Install cargo-ndk
-    shell: bash
-    run: |
-      set -e
+          echo ""
+          cargo ndk --version
 
-      echo "========================================"
-      echo "INSTALLING CARGO-NDK"
-      echo "========================================"
+          echo ""
+          echo "SUCCESS: cargo-ndk installed."
 
-      cargo install cargo-ndk --locked
 
-      echo ""
-      cargo ndk --version
+      # ========================================
+      # SET UP ANDROID SDK
+      # ========================================
 
-      echo ""
-      echo "SUCCESS: cargo-ndk installed."
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
 
 
-  # ========================================
-  # SET UP ANDROID SDK
-  # ========================================
+      # ========================================
+      # INSTALL ANDROID COMPONENTS
+      # ========================================
 
-  - name: Set up Android SDK
-    uses: android-actions/setup-android@v3
+      - name: Install Android SDK components
+        shell: bash
+        run: |
+          set -e
 
+          echo "========================================"
+          echo "INSTALLING ANDROID COMPONENTS"
+          echo "========================================"
 
-  # ========================================
-  # INSTALL ANDROID COMPONENTS
-  # ========================================
+          yes | sdkmanager --licenses || true
 
-  - name: Install Android SDK components
-    shell: bash
-    run: |
-      set -e
+          sdkmanager \
+            "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;35.0.0" \
+            "ndk;28.2.13676358"
 
-      echo "========================================"
-      echo "INSTALLING ANDROID COMPONENTS"
-      echo "========================================"
 
-      yes | sdkmanager --licenses || true
+      # ========================================
+      # CONFIGURE ANDROID ENVIRONMENT
+      # ========================================
 
-      sdkmanager \
-        "platform-tools" \
-        "platforms;android-35" \
-        "build-tools;35.0.0" \
-        "ndk;28.2.13676358"
+      - name: Configure Android environment
+        shell: bash
+        run: |
+          set -e
 
+          NDK_VERSION="28.2.13676358"
+          NDK_PATH="$ANDROID_HOME/ndk/$NDK_VERSION"
 
-  # ========================================
-  # CONFIGURE ANDROID ENVIRONMENT
-  # ========================================
+          echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_HOME=$NDK_PATH" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=$NDK_PATH" >> "$GITHUB_ENV"
+          echo "NDK_HOME=$NDK_PATH" >> "$GITHUB_ENV"
 
-  - name: Configure Android environment
-    shell: bash
-    run: |
-      set -e
+          echo "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
+          echo "$ANDROID_HOME/build-tools/35.0.0" >> "$GITHUB_PATH"
 
-      NDK_VERSION="28.2.13676358"
-      NDK_PATH="$ANDROID_HOME/ndk/$NDK_VERSION"
+          echo ""
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          echo "ANDROID_NDK_HOME=$NDK_PATH"
+          echo "ANDROID_NDK_ROOT=$NDK_PATH"
 
-      echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
 
-      echo "ANDROID_NDK_HOME=$NDK_PATH" >> "$GITHUB_ENV"
-      echo "ANDROID_NDK_ROOT=$NDK_PATH" >> "$GITHUB_ENV"
-      echo "NDK_HOME=$NDK_PATH" >> "$GITHUB_ENV"
+      # ========================================
+      # VERIFY RUST ENVIRONMENT
+      # ========================================
 
-      echo "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
-      echo "$ANDROID_HOME/build-tools/35.0.0" >> "$GITHUB_PATH"
+      - name: Verify Rust environment
+        shell: bash
+        run: |
+          set -e
 
-      echo ""
-      echo "ANDROID_HOME=$ANDROID_HOME"
-      echo "ANDROID_NDK_HOME=$NDK_PATH"
-      echo "ANDROID_NDK_ROOT=$NDK_PATH"
+          echo "========================================"
+          echo "VERIFYING RUST ENVIRONMENT"
+          echo "========================================"
 
+          rustc --version
+          cargo --version
+          cargo ndk --version
 
-  # ========================================
-  # VERIFY RUST ENVIRONMENT
-  # ========================================
+          echo ""
+          echo "Installed Rust targets:"
+          rustup target list --installed
 
-  - name: Verify Rust environment
-    shell: bash
-    run: |
-      set -e
 
-      echo "========================================"
-      echo "VERIFYING RUST ENVIRONMENT"
-      echo "========================================"
+      # ========================================
+      # VERIFY FLUTTER ENVIRONMENT
+      # ========================================
 
-      rustc --version
-      cargo --version
-      cargo ndk --version
+      - name: Verify Flutter environment
+        shell: bash
+        run: |
+          set -e
 
-      echo ""
-      rustup target list --installed
+          echo "========================================"
+          echo "VERIFYING FLUTTER ENVIRONMENT"
+          echo "========================================"
 
-      echo ""
-      echo "SUCCESS: Rust environment verified."
+          java -version
 
+          echo ""
+          flutter --version
 
-  # ========================================
-  # VERIFY FLUTTER ENVIRONMENT
-  # ========================================
+          echo ""
+          flutter doctor -v
 
-  - name: Verify Flutter environment
-    shell: bash
-    run: |
-      set -e
+          echo ""
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME"
+          echo "ANDROID_NDK_ROOT=$ANDROID_NDK_ROOT"
 
-      echo "========================================"
-      echo "VERIFYING ENVIRONMENT"
-      echo "========================================"
+          test -d "$ANDROID_HOME"
+          test -d "$ANDROID_NDK_HOME"
 
-      java -version
+          echo ""
+          echo "SUCCESS: Environment verified."
 
-      echo ""
-      flutter --version
 
-      echo ""
-      flutter doctor -v
+      # ========================================
+      # CREATE / REPAIR GRADLE WRAPPER
+      # ========================================
 
-      echo ""
-      echo "ANDROID_HOME=$ANDROID_HOME"
-      echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME"
-      echo "ANDROID_NDK_ROOT=$ANDROID_NDK_ROOT"
+      - name: Create Gradle wrapper if missing
+        working-directory: ${{ env.PROJECT_DIR }}
+        shell: bash
+        run: |
+          set -e
 
-      test -d "$ANDROID_HOME"
-      test -d "$ANDROID_NDK_HOME"
+          echo "========================================"
+          echo "CHECKING GRADLE WRAPPER"
+          echo "========================================"
 
-      echo ""
-      echo "SUCCESS: Environment verified."
+          if [ -f "android/gradlew" ] && \
+             [ -f "android/gradle/wrapper/gradle-wrapper.jar" ] && \
+             [ -f "android/gradle/wrapper/gradle-wrapper.properties" ]; then
 
+            chmod +x android/gradlew
 
-  # ========================================
-  # CREATE / REPAIR GRADLE WRAPPER
-  # ========================================
+            echo "SUCCESS: Gradle wrapper already exists."
+            exit 0
+          fi
 
-  - name: Create Gradle wrapper if missing
-    working-directory: ${{ env.PROJECT_DIR }}
-    shell: bash
-    run: |
-      set -e
+          echo ""
+          echo "Gradle wrapper missing."
+          echo "Creating Gradle wrapper..."
 
-      echo "========================================"
-      echo "CHECKING GRADLE WRAPPER"
-      echo "========================================"
+          GRADLE_VERSION="8.14.3"
 
-      if [ -f "android/gradlew" ] && \
-         [ -f "android/gradle/wrapper/gradle-wrapper.jar" ] && \
-         [ -f "android/gradle/wrapper/gradle-wrapper.properties" ]; then
+          TEMP_DIR="$(mktemp -d)"
 
-        chmod +x android/gradlew
+          cd "$TEMP_DIR"
 
-        echo "SUCCESS: Gradle wrapper already exists."
-        exit 0
-      fi
+          printf 'rootProject.name = "wrapper-generator"\n' > settings.gradle
+          printf '\n' > build.gradle
 
-      echo ""
-      echo "Gradle wrapper missing."
-      echo "Creating Gradle wrapper..."
+          echo "Downloading Gradle ${GRADLE_VERSION}..."
 
-      GRADLE_VERSION="8.14.3"
+          curl \
+            --fail \
+            --location \
+            --retry 3 \
+            --output "gradle-${GRADLE_VERSION}-bin.zip" \
+            "https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip"
 
-      TEMP_DIR="$(mktemp -d)"
+          unzip -q "gradle-${GRADLE_VERSION}-bin.zip"
 
-      echo ""
-      echo "Using temporary directory:"
-      echo "$TEMP_DIR"
+          echo "Generating wrapper..."
 
-      cd "$TEMP_DIR"
+          "./gradle-${GRADLE_VERSION}/bin/gradle" \
+            wrapper \
+            --gradle-version "${GRADLE_VERSION}" \
+            --distribution-type bin \
+            --no-daemon
 
-      printf 'rootProject.name = "wrapper-generator"\n' > settings.gradle
-      printf '\n' > build.gradle
+          mkdir -p "$PROJECT_DIR/android/gradle/wrapper"
 
-      echo ""
-      echo "Downloading Gradle ${GRADLE_VERSION}..."
+          cp gradlew \
+            "$PROJECT_DIR/android/gradlew"
 
-      curl \
-        --fail \
-        --location \
-        --retry 3 \
-        --output "gradle-${GRADLE_VERSION}-bin.zip" \
-        "https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip"
+          cp gradlew.bat \
+            "$PROJECT_DIR/android/gradlew.bat"
 
-      unzip -q \
-        "gradle-${GRADLE_VERSION}-bin.zip"
+          cp gradle/wrapper/gradle-wrapper.jar \
+            "$PROJECT_DIR/android/gradle/wrapper/gradle-wrapper.jar"
 
-      echo ""
-      echo "Generating wrapper..."
+          cp gradle/wrapper/gradle-wrapper.properties \
+            "$PROJECT_DIR/android/gradle/wrapper/gradle-wrapper.properties"
 
-      "./gradle-${GRADLE_VERSION}/bin/gradle" \
-        wrapper \
-        --gradle-version "${GRADLE_VERSION}" \
-        --distribution-type bin \
-        --no-daemon
+          chmod +x "$PROJECT_DIR/android/gradlew"
 
-      mkdir -p "$PROJECT_DIR/android/gradle/wrapper"
+          echo ""
+          echo "SUCCESS: GRADLE WRAPPER CREATED"
 
-      cp gradlew \
-        "$PROJECT_DIR/android/gradlew"
 
-      cp gradlew.bat \
-        "$PROJECT_DIR/android/gradlew.bat"
+      # ========================================
+      # VERIFY GRADLE
+      # ========================================
 
-      cp gradle/wrapper/gradle-wrapper.jar \
-        "$PROJECT_DIR/android/gradle/wrapper/gradle-wrapper.jar"
+      - name: Verify Gradle
+        working-directory: ${{ env.PROJECT_DIR }}/android
+        shell: bash
+        run: |
+          set -e
 
-      cp gradle/wrapper/gradle-wrapper.properties \
-        "$PROJECT_DIR/android/gradle/wrapper/gradle-wrapper.properties"
+          echo "========================================"
+          echo "VERIFYING GRADLE"
+          echo "========================================"
 
-      chmod +x "$PROJECT_DIR/android/gradlew"
+          chmod +x ./gradlew
+          ./gradlew --version
 
-      echo ""
-      echo "========================================"
-      echo "SUCCESS: GRADLE WRAPPER CREATED"
-      echo "========================================"
 
+      # ========================================
+      # CLEAN PROJECT
+      # ========================================
 
-  # ========================================
-  # VERIFY GRADLE
-  # ========================================
+      - name: Clean previous build files
+        working-directory: ${{ env.PROJECT_DIR }}
+        shell: bash
+        run: |
+          set -e
 
-  - name: Verify Gradle
-    working-directory: ${{ env.PROJECT_DIR }}/android
-    shell: bash
-    run: |
-      set -e
+          echo "========================================"
+          echo "CLEANING PROJECT"
+          echo "========================================"
 
-      echo "========================================"
-      echo "VERIFYING GRADLE"
-      echo "========================================"
+          flutter clean || true
 
-      chmod +x ./gradlew
+          rm -rf .dart_tool
+          rm -rf build
+          rm -rf android/.gradle
+          rm -rf .gradle
 
-      ./gradlew --version
+          echo "SUCCESS: Project cleaned."
 
 
-  # ========================================
-  # CLEAN PROJECT
-  # ========================================
+      # ========================================
+      # GET FLUTTER DEPENDENCIES
+      # ========================================
 
-  - name: Clean previous build files
-    working-directory: ${{ env.PROJECT_DIR }}
-    shell: bash
-    run: |
-      set -e
+      - name: Get Flutter dependencies
+        working-directory: ${{ env.PROJECT_DIR }}
+        shell: bash
+        run: |
+          set -e
 
-      echo "========================================"
-      echo "CLEANING PROJECT"
-      echo "========================================"
+          echo "========================================"
+          echo "GETTING FLUTTER DEPENDENCIES"
+          echo "========================================"
 
-      flutter clean || true
+          flutter pub get
 
-      rm -rf .dart_tool
-      rm -rf build
-      rm -rf android/.gradle
-      rm -rf .gradle
 
-      echo "SUCCESS: Project cleaned."
+      # ========================================
+      # ANALYZE DART CODE
+      # ========================================
 
+      - name: Analyze Dart code
+        working-directory: ${{ env.PROJECT_DIR }}
+        shell: bash
+        run: |
+          set +e
 
-  # ========================================
-  # GET FLUTTER DEPENDENCIES
-  # ========================================
+          echo "========================================"
+          echo "ANALYZING DART CODE"
+          echo "========================================"
 
-  - name: Get Flutter dependencies
-    working-directory: ${{ env.PROJECT_DIR }}
-    shell: bash
-    run: |
-      set -e
+          flutter analyze \
+            > "$GITHUB_WORKSPACE/flutter-analyze.log" 2>&1
 
-      echo "========================================"
-      echo "GETTING FLUTTER DEPENDENCIES"
-      echo "========================================"
+          ANALYZE_EXIT=$?
 
-      flutter pub get
+          cat "$GITHUB_WORKSPACE/flutter-analyze.log"
 
+          if [ $ANALYZE_EXIT -ne 0 ]; then
+            echo ""
+            echo "WARNING: Flutter analysis found issues."
+            echo "Build will continue."
+          else
+            echo ""
+            echo "SUCCESS: Dart analysis completed."
+          fi
 
-  # ========================================
-  # ANALYZE DART CODE
-  # ========================================
+          exit 0
 
-  - name: Analyze Dart code
-    working-directory: ${{ env.PROJECT_DIR }}
-    shell: bash
-    run: |
-      set +e
 
-      echo "========================================"
-      echo "ANALYZING DART CODE"
-      echo "========================================"
+      # ========================================
+      # BUILD RELEASE APK
+      # ========================================
 
-      flutter analyze \
-        > "$GITHUB_WORKSPACE/flutter-analyze.log" 2>&1
+      - name: Build Flutter APK
+        working-directory: ${{ env.PROJECT_DIR }}
+        shell: bash
+        run: |
+          set +e
 
-      ANALYZE_EXIT=$?
+          echo "========================================"
+          echo "BUILDING RELEASE APK"
+          echo "========================================"
 
-      cat "$GITHUB_WORKSPACE/flutter-analyze.log"
+          echo "PROJECT_DIR=$PROJECT_DIR"
+          echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME"
+          echo "ANDROID_NDK_ROOT=$ANDROID_NDK_ROOT"
 
-      if [ $ANALYZE_EXIT -ne 0 ]; then
-        echo ""
-        echo "WARNING: Flutter analysis found issues."
-        echo "The build will continue."
-      else
-        echo ""
-        echo "SUCCESS: Dart analysis completed."
-      fi
+          flutter build apk \
+            --release \
+            --verbose \
+            > "$GITHUB_WORKSPACE/flutter-build.log" 2>&1
 
-      exit 0
+          BUILD_EXIT=$?
 
+          echo ""
+          echo "========================================"
+          echo "FULL BUILD LOG"
+          echo "========================================"
 
-  # ========================================
-  # BUILD RELEASE APK
-  # ========================================
+          cat "$GITHUB_WORKSPACE/flutter-build.log"
 
-  - name: Build Flutter APK
-    working-directory: ${{ env.PROJECT_DIR }}
-    shell: bash
-    run: |
-      set +e
+          if [ $BUILD_EXIT -ne 0 ]; then
 
-      echo "========================================"
-      echo "BUILDING RELEASE APK"
-      echo "========================================"
+            echo ""
+            echo "========================================"
+            echo "IMPORTANT ERROR LINES"
+            echo "========================================"
 
-      echo "Using:"
-      echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME"
-      echo "ANDROID_NDK_ROOT=$ANDROID_NDK_ROOT"
+            grep \
+              -i \
+              -n \
+              -E "error|exception|cargo|rust|ndk|failed|undefined|not found|type" \
+              "$GITHUB_WORKSPACE/flutter-build.log" \
+              | tail -n 400 || true
 
-      flutter build apk \
-        --release \
-        --verbose \
-        > "$GITHUB_WORKSPACE/flutter-build.log" 2>&1
+            echo ""
+            echo "========================================"
+            echo "BUILD FAILED"
+            echo "========================================"
 
-      BUILD_EXIT=$?
+            exit $BUILD_EXIT
+          fi
 
-      echo ""
-      echo "========================================"
-      echo "FULL BUILD LOG"
-      echo "========================================"
+          echo ""
+          echo "========================================"
+          echo "BUILD SUCCESSFUL"
+          echo "========================================"
 
-      cat "$GITHUB_WORKSPACE/flutter-build.log"
 
-      if [ $BUILD_EXIT -ne 0 ]; then
+      # ========================================
+      # LOCATE RELEASE APK
+      # ========================================
 
-        echo ""
-        echo "========================================"
-        echo "IMPORTANT ERROR LINES"
-        echo "========================================"
+      - name: Locate release APK
+        working-directory: ${{ env.PROJECT_DIR }}
+        shell: bash
+        run: |
+          set -e
 
-        grep \
-          -i \
-          -n \
-          -E "error|exception|cargo|rust|ndk|target kernel_snapshot|failed|undefined|not found|type" \
-          "$GITHUB_WORKSPACE/flutter-build.log" \
-          | tail -n 400 || true
+          echo "========================================"
+          echo "LOCATING RELEASE APK"
+          echo "========================================"
 
-        echo ""
-        echo "========================================"
-        echo "BUILD FAILED"
-        echo "========================================"
+          APK=""
 
-        exit $BUILD_EXIT
-      fi
+          if [ -f "build/app/outputs/flutter-apk/app-release.apk" ]; then
+            APK="build/app/outputs/flutter-apk/app-release.apk"
 
-      echo ""
-      echo "========================================"
-      echo "BUILD SUCCESSFUL"
-      echo "========================================"
+          elif [ -f "build/app/outputs/apk/release/app-release.apk" ]; then
+            APK="build/app/outputs/apk/release/app-release.apk"
 
+          elif [ -f "build/app/outputs/apk/release/app-release-unsigned.apk" ]; then
+            APK="build/app/outputs/apk/release/app-release-unsigned.apk"
+          fi
 
-  # ========================================
-  # LOCATE RELEASE APK
-  # ========================================
+          if [ -z "$APK" ]; then
 
-  - name: Locate release APK
-    working-directory: ${{ env.PROJECT_DIR }}
-    shell: bash
-    run: |
-      set -e
+            echo "ERROR: No release APK found."
 
-      echo "========================================"
-      echo "LOCATING RELEASE APK"
-      echo "========================================"
+            echo ""
+            echo "Searching for APK files..."
 
-      APK=""
+            find build \
+              -type f \
+              -name "*.apk" \
+              -print || true
 
-      if [ -f "build/app/outputs/flutter-apk/app-release.apk" ]; then
-        APK="build/app/outputs/flutter-apk/app-release.apk"
+            exit 1
+          fi
 
-      elif [ -f "build/app/outputs/apk/release/app-release.apk" ]; then
-        APK="build/app/outputs/apk/release/app-release.apk"
+          echo "APK_PATH=$PROJECT_DIR/$APK" >> "$GITHUB_ENV"
 
-      elif [ -f "build/app/outputs/apk/release/app-release-unsigned.apk" ]; then
-        APK="build/app/outputs/apk/release/app-release-unsigned.apk"
-      fi
+          echo ""
+          echo "SUCCESS: APK FOUND"
+          echo "APK_PATH=$PROJECT_DIR/$APK"
 
-      if [ -z "$APK" ]; then
+          ls -lh "$APK"
 
-        echo "ERROR: No release APK found."
 
-        echo ""
-        echo "Searching for APK files..."
+      # ========================================
+      # GENERATE TEST SIGNING KEY
+      # ========================================
 
-        find build \
-          -type f \
-          -name "*.apk" \
-          -print || true
+      - name: Generate signing key
+        shell: bash
+        run: |
+          set -e
 
-        exit 1
-      fi
+          echo "========================================"
+          echo "GENERATING SIGNING KEY"
+          echo "========================================"
 
-      echo "APK_PATH=$PROJECT_DIR/$APK" >> "$GITHUB_ENV"
+          KEYSTORE="$RUNNER_TEMP/ycash-release.jks"
 
-      echo ""
-      echo "SUCCESS: APK FOUND"
-      echo "APK_PATH=$PROJECT_DIR/$APK"
+          keytool -genkeypair \
+            -keystore "$KEYSTORE" \
+            -storepass "ycash-test-password" \
+            -keypass "ycash-test-password" \
+            -alias "ycash" \
+            -keyalg RSA \
+            -keysize 4096 \
+            -validity 10000 \
+            -dname "CN=Ycash,O=Ycash,C=GB"
 
-      ls -lh "$APK"
+          echo "KEYSTORE_PATH=$KEYSTORE" >> "$GITHUB_ENV"
 
+          echo ""
+          echo "SUCCESS: Signing key created."
 
-  # ========================================
-  # GENERATE TEST SIGNING KEY
-  # ========================================
 
-  - name: Generate signing key
-    shell: bash
-    run: |
-      set -e
+      # ========================================
+      # CONFIGURE APK SIGNING TOOLS
+      # ========================================
 
-      echo "========================================"
-      echo "GENERATING SIGNING KEY"
-      echo "========================================"
+      - name: Configure APK signing tools
+        shell: bash
+        run: |
+          set -e
 
-      KEYSTORE="$RUNNER_TEMP/ycash-release.jks"
+          echo "========================================"
+          echo "CONFIGURING APK SIGNING TOOLS"
+          echo "========================================"
 
-      keytool -genkeypair \
-        -keystore "$KEYSTORE" \
-        -storepass "ycash-test-password" \
-        -keypass "ycash-test-password" \
-        -alias "ycash" \
-        -keyalg RSA \
-        -keysize 4096 \
-        -validity 10000 \
-        -dname "CN=Ycash,O=Ycash,C=GB"
+          BUILD_TOOLS="$ANDROID_HOME/build-tools/35.0.0"
 
-      echo "KEYSTORE_PATH=$KEYSTORE" >> "$GITHUB_ENV"
+          test -f "$BUILD_TOOLS/apksigner"
+          test -f "$BUILD_TOOLS/zipalign"
 
-      echo ""
-      echo "SUCCESS: Signing key created."
+          echo "APKSIGNER=$BUILD_TOOLS/apksigner" >> "$GITHUB_ENV"
+          echo "ZIPALIGN=$BUILD_TOOLS/zipalign" >> "$GITHUB_ENV"
 
+          "$BUILD_TOOLS/apksigner" --version
 
-  # ========================================
-  # CONFIGURE APK SIGNING TOOLS
-  # ========================================
 
-  - name: Configure APK signing tools
-    shell: bash
-    run: |
-      set -e
+      # ========================================
+      # ALIGN APK
+      # ========================================
 
-      echo "========================================"
-      echo "CONFIGURING APK SIGNING TOOLS"
-      echo "========================================"
+      - name: Align APK
+        shell: bash
+        run: |
+          set -e
 
-      BUILD_TOOLS="$ANDROID_HOME/build-tools/35.0.0"
+          echo "========================================"
+          echo "ALIGNING APK"
+          echo "========================================"
 
-      test -f "$BUILD_TOOLS/apksigner"
-      test -f "$BUILD_TOOLS/zipalign"
+          mkdir -p "$GITHUB_WORKSPACE/signed-output"
 
-      echo "APKSIGNER=$BUILD_TOOLS/apksigner" >> "$GITHUB_ENV"
-      echo "ZIPALIGN=$BUILD_TOOLS/zipalign" >> "$GITHUB_ENV"
+          "$ZIPALIGN" \
+            -f \
+            -p \
+            4 \
+            "$APK_PATH" \
+            "$GITHUB_WORKSPACE/signed-output/Ycash-aligned.apk"
 
-      "$BUILD_TOOLS/apksigner" --version
 
+      # ========================================
+      # SIGN APK
+      # ========================================
 
-  # ========================================
-  # ALIGN APK
-  # ========================================
+      - name: Sign APK
+        shell: bash
+        run: |
+          set -e
 
-  - name: Align APK
-    shell: bash
-    run: |
-      set -e
+          echo "========================================"
+          echo "SIGNING APK"
+          echo "========================================"
 
-      echo "========================================"
-      echo "ALIGNING APK"
-      echo "========================================"
+          "$APKSIGNER" sign \
+            --ks "$KEYSTORE_PATH" \
+            --ks-key-alias "ycash" \
+            --ks-pass pass:ycash-test-password \
+            --key-pass pass:ycash-test-password \
+            --v1-signing-enabled true \
+            --v2-signing-enabled true \
+            --v3-signing-enabled true \
+            --out "$GITHUB_WORKSPACE/signed-output/Ycash.apk" \
+            "$GITHUB_WORKSPACE/signed-output/Ycash-aligned.apk"
 
-      mkdir -p "$GITHUB_WORKSPACE/signed-output"
 
-      "$ZIPALIGN" \
-        -f \
-        -p \
-        4 \
-        "$APK_PATH" \
-        "$GITHUB_WORKSPACE/signed-output/Ycash-aligned.apk"
+      # ========================================
+      # VERIFY APK
+      # ========================================
 
+      - name: Verify signed APK
+        shell: bash
+        run: |
+          set -e
 
-  # ========================================
-  # SIGN APK
-  # ========================================
+          echo "========================================"
+          echo "VERIFYING APK SIGNATURE"
+          echo "========================================"
 
-  - name: Sign APK
-    shell: bash
-    run: |
-      set -e
+          "$APKSIGNER" verify \
+            --verbose \
+            --print-certs \
+            "$GITHUB_WORKSPACE/signed-output/Ycash.apk"
 
-      echo "========================================"
-      echo "SIGNING APK"
-      echo "========================================"
+          echo ""
+          echo "========================================"
+          echo "VERIFYING APK ALIGNMENT"
+          echo "========================================"
 
-      "$APKSIGNER" sign \
-        --ks "$KEYSTORE_PATH" \
-        --ks-key-alias "ycash" \
-        --ks-pass pass:ycash-test-password \
-        --key-pass pass:ycash-test-password \
-        --v1-signing-enabled true \
-        --v2-signing-enabled true \
-        --v3-signing-enabled true \
-        --out "$GITHUB_WORKSPACE/signed-output/Ycash.apk" \
-        "$GITHUB_WORKSPACE/signed-output/Ycash-aligned.apk"
+          "$ZIPALIGN" \
+            -c \
+            -v \
+            4 \
+            "$GITHUB_WORKSPACE/signed-output/Ycash.apk"
 
+          echo ""
+          echo "========================================"
+          echo "SUCCESS: APK VERIFIED"
+          echo "========================================"
 
-  # ========================================
-  # VERIFY APK
-  # ========================================
+          ls -lh \
+            "$GITHUB_WORKSPACE/signed-output/Ycash.apk"
 
-  - name: Verify signed APK
-    shell: bash
-    run: |
-      set -e
 
-      echo "========================================"
-      echo "VERIFYING APK SIGNATURE"
-      echo "========================================"
+      # ========================================
+      # UPLOAD BUILD LOGS
+      # ========================================
 
-      "$APKSIGNER" verify \
-        --verbose \
-        --print-certs \
-        "$GITHUB_WORKSPACE/signed-output/Ycash.apk"
+      - name: Upload build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Ycash-Build-Logs
+          path: |
+            flutter-build.log
+            flutter-analyze.log
+          if-no-files-found: warn
+          retention-days: 30
 
-      echo ""
-      echo "========================================"
-      echo "VERIFYING APK ALIGNMENT"
-      echo "========================================"
 
-      "$ZIPALIGN" \
-        -c \
-        -v \
-        4 \
-        "$GITHUB_WORKSPACE/signed-output/Ycash.apk"
+      # ========================================
+      # UPLOAD VERIFIED APK
+      # ========================================
 
-      echo ""
-      echo "========================================"
-      echo "SUCCESS: APK VERIFIED"
-      echo "========================================"
-
-      ls -lh \
-        "$GITHUB_WORKSPACE/signed-output/Ycash.apk"
-
-
-  # ========================================
-  # UPLOAD BUILD LOGS
-  # ========================================
-
-  - name: Upload build logs
-    if: always()
-    uses: actions/upload-artifact@v4
-    with:
-      name: Ycash-Build-Logs
-      path: |
-        flutter-build.log
-        flutter-analyze.log
-      if-no-files-found: warn
-      retention-days: 30
-
-
-  # ========================================
-  # UPLOAD VERIFIED APK
-  # ========================================
-
-  - name: Upload verified APK
-    if: success()
-    uses: actions/upload-artifact@v4
-    with:
-      name: Ycash-Wallet-Verified-APK
-      path: signed-output/Ycash.apk
-      if-no-files-found: error
-      retention-days: 30
+      - name: Upload verified APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Ycash-Wallet-Verified-APK
+          path: signed-output/Ycash.apk
+          if-no-files-found: error
+          retention-days: 30
