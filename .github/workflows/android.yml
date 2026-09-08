@@ -20,11 +20,68 @@ jobs:
     steps:
 
       # ========================================
-      # CHECKOUT
+      # CHECKOUT REPOSITORY
       # ========================================
 
       - name: Checkout repository
         uses: actions/checkout@v4
+
+
+      # ========================================
+      # SHOW REPOSITORY CONTENTS
+      # ========================================
+
+      - name: Show repository contents
+        run: |
+          echo "Repository files:"
+          find . -maxdepth 3 -type f | sort
+
+
+      # ========================================
+      # FIND AND EXTRACT PROJECT ZIP
+      # ========================================
+
+      - name: Extract Flutter project
+        run: |
+          set -e
+
+          ZIP_FILE=$(find . -maxdepth 2 -type f -name "*.zip" | head -n 1)
+
+          if [ -z "$ZIP_FILE" ]; then
+            echo "ERROR: No ZIP file found."
+            exit 1
+          fi
+
+          echo "Found ZIP: $ZIP_FILE"
+
+          mkdir -p project
+
+          unzip -q "$ZIP_FILE" -d project
+
+          echo "Extracted files:"
+          find project -maxdepth 3 -type f | sort | head -n 100
+
+
+      # ========================================
+      # FIND FLUTTER PROJECT DIRECTORY
+      # ========================================
+
+      - name: Find Flutter project
+        id: project
+        run: |
+          set -e
+
+          PROJECT_DIR=$(find project -name pubspec.yaml -type f -print -quit | xargs dirname)
+
+          if [ -z "$PROJECT_DIR" ]; then
+            echo "ERROR: pubspec.yaml not found."
+            exit 1
+          fi
+
+          echo "Flutter project found at:"
+          echo "$PROJECT_DIR"
+
+          echo "path=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
 
 
       # ========================================
@@ -40,7 +97,7 @@ jobs:
 
 
       # ========================================
-      # ANDROID SDK + NDK
+      # ANDROID SDK
       # ========================================
 
       - name: Set up Android SDK
@@ -118,9 +175,27 @@ jobs:
           cargo ndk --version
 
           echo "ANDROID_HOME=$ANDROID_HOME"
-          echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME"
 
           ls "$ANDROID_HOME/platforms/android-35"
+
+
+      # ========================================
+      # SHOW PROJECT STRUCTURE
+      # ========================================
+
+      - name: Show Flutter project structure
+        working-directory: ${{ steps.project.outputs.path }}
+        run: |
+          pwd
+          ls -la
+
+          echo ""
+          echo "Android directory:"
+          ls -la android || true
+
+          echo ""
+          echo "Rust files:"
+          find . -maxdepth 4 -name "Cargo.toml" -print
 
 
       # ========================================
@@ -128,6 +203,7 @@ jobs:
       # ========================================
 
       - name: Get Flutter packages
+        working-directory: ${{ steps.project.outputs.path }}
         run: |
           flutter clean
           flutter pub get
@@ -138,28 +214,52 @@ jobs:
       # ========================================
 
       - name: Analyze Dart source
+        working-directory: ${{ steps.project.outputs.path }}
         run: |
           flutter analyze
 
 
       # ========================================
-      # BUILD APK
+      # BUILD RELEASE APK
       # ========================================
 
       - name: Build release APK
+        working-directory: ${{ steps.project.outputs.path }}
+        env:
+          ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/27.0.12077973
+          ANDROID_NDK_ROOT: ${{ env.ANDROID_HOME }}/ndk/27.0.12077973
         run: |
           flutter build apk --release --verbose
 
 
       # ========================================
-      # VERIFY APK
+      # FIND APK
       # ========================================
 
-      - name: Verify APK exists
+      - name: Find generated APK
         run: |
-          ls -lh build/app/outputs/flutter-apk/
+          set -e
 
-          test -f build/app/outputs/flutter-apk/app-release.apk
+          echo "Searching for APK..."
+
+          APK_FILE=$(find project -type f -name "app-release.apk" -print -quit)
+
+          if [ -z "$APK_FILE" ]; then
+            echo "ERROR: app-release.apk was not found."
+            echo ""
+            echo "All APK files:"
+            find project -type f -name "*.apk" || true
+            exit 1
+          fi
+
+          echo "APK found:"
+          echo "$APK_FILE"
+
+          mkdir -p release
+
+          cp "$APK_FILE" release/Ycash-Reborn.apk
+
+          ls -lh release/
 
 
       # ========================================
@@ -170,6 +270,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Ycash-Reborn-release-apk
-          path: build/app/outputs/flutter-apk/app-release.apk
+          path: release/Ycash-Reborn.apk
           if-no-files-found: error
           retention-days: 14
