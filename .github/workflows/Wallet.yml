@@ -48,10 +48,17 @@ jobs:
 
           unzip -q "$ZIP_FILE" -d extracted_project
 
+          echo ""
           echo "Extracted project files:"
-          find extracted_project -maxdepth 6 \
+          find extracted_project -maxdepth 8 \
             -type f \
-            \( -name "pubspec.yaml" -o -name "settings.gradle" -o -name "settings.gradle.kts" \) \
+            \( \
+              -name "pubspec.yaml" \
+              -o -name "settings.gradle" \
+              -o -name "settings.gradle.kts" \
+              -o -name "build.gradle" \
+              -o -name "build.gradle.kts" \
+            \) \
             -print
 
       - name: Locate Flutter project
@@ -71,6 +78,7 @@ jobs:
 
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
+          echo ""
           echo "Flutter project found at:"
           echo "$PROJECT_DIR"
 
@@ -90,10 +98,6 @@ jobs:
           set -e
 
           echo "ANDROID_HOME=$ANDROID_HOME"
-          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
-
-          echo "sdkmanager location:"
-          which sdkmanager
 
           yes | sdkmanager --licenses || true
 
@@ -107,7 +111,6 @@ jobs:
         run: |
           set -e
 
-          echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
           echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/29.0.14206865" >> "$GITHUB_ENV"
           echo "NDK_HOME=$ANDROID_HOME/ndk/29.0.14206865" >> "$GITHUB_ENV"
@@ -143,10 +146,6 @@ jobs:
           flutter --version
 
           echo ""
-          echo "=== Flutter Doctor ==="
-          flutter doctor -v
-
-          echo ""
           echo "=== Rust ==="
           rustc --version
           cargo --version
@@ -155,13 +154,7 @@ jobs:
           echo ""
           echo "=== Android SDK ==="
           echo "ANDROID_HOME=$ANDROID_HOME"
-          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/29.0.14206865"
-
-          echo ""
-          echo "=== sdkmanager ==="
-          which sdkmanager
-          sdkmanager --version
 
       - name: Get Flutter dependencies
         working-directory: ${{ env.PROJECT_DIR }}
@@ -176,40 +169,169 @@ jobs:
 
           echo ""
           echo "=== Android Gradle files ==="
-          find android -maxdepth 3 \
+          find android -maxdepth 4 \
             -type f \
-            \( -name "*.gradle" -o -name "*.gradle.kts" -o -name "gradle.properties" \) \
+            \( \
+              -name "*.gradle" \
+              -o -name "*.gradle.kts" \
+              -o -name "gradle.properties" \
+              -o -name "gradle-wrapper.properties" \
+            \) \
             -print
 
           echo ""
           echo "=== Rust project ==="
-          find packages/ycash_core_ffi/rust \
-            -maxdepth 2 \
-            -type f \
-            \( -name "Cargo.toml" -o -name "Cargo.lock" \) \
-            -print
 
-      - name: Configure AGP 9 compatibility
+          if [ -d "packages/ycash_core_ffi/rust" ]; then
+            find packages/ycash_core_ffi/rust \
+              -maxdepth 2 \
+              -type f \
+              \( -name "Cargo.toml" -o -name "Cargo.lock" \) \
+              -print
+          else
+            echo "Rust directory not found at expected path."
+          fi
+
+      - name: Fix AGP 9 incompatibility
         working-directory: ${{ env.PROJECT_DIR }}
         run: |
           set -e
+
+          echo "========================================"
+          echo "Checking current Android Gradle versions"
+          echo "========================================"
+
+          echo ""
+          echo "--- Gradle files before patch ---"
+
+          grep -R \
+            -n \
+            -E \
+            'com\.android\.application|com\.android\.library|com\.android\.tools\.build:gradle|androidGradlePlugin' \
+            android \
+            --include="*.gradle" \
+            --include="*.gradle.kts" \
+            --include="*.toml" || true
+
+          echo ""
+          echo "--- Gradle wrapper before patch ---"
+
+          cat android/gradle/wrapper/gradle-wrapper.properties || true
+
+          echo ""
+          echo "========================================"
+          echo "Removing AGP 9 newDsl configuration"
+          echo "========================================"
 
           GRADLE_PROPERTIES="android/gradle.properties"
 
           touch "$GRADLE_PROPERTIES"
 
-          echo "=== Removing existing android.newDsl settings ==="
-          sed -i '/^[[:space:]]*android\.newDsl[[:space:]]*=/d' "$GRADLE_PROPERTIES"
-
-          echo "android.newDsl=false" >> "$GRADLE_PROPERTIES"
+          sed -i \
+            '/^[[:space:]]*android\.newDsl[[:space:]]*=/d' \
+            "$GRADLE_PROPERTIES"
 
           echo ""
-          echo "=== Final gradle.properties ==="
+          echo "========================================"
+          echo "Setting Gradle version to 8.10.2"
+          echo "========================================"
+
+          if [ -f "android/gradle/wrapper/gradle-wrapper.properties" ]; then
+            sed -i \
+              's#distributionUrl=.*#distributionUrl=https\\://services.gradle.org/distributions/gradle-8.10.2-bin.zip#' \
+              android/gradle/wrapper/gradle-wrapper.properties
+          fi
+
+          echo ""
+          echo "========================================"
+          echo "Replacing AGP 9 with AGP 8.8.2"
+          echo "========================================"
+
+          find android \
+            -type f \
+            \( \
+              -name "*.gradle" \
+              -o -name "*.gradle.kts" \
+              -o -name "*.toml" \
+            \) \
+            -print0 | while IFS= read -r -d '' file; do
+
+              echo "Checking: $file"
+
+              sed -i -E \
+                's/com\.android\.tools\.build:gradle:9\.[0-9.]+/com.android.tools.build:gradle:8.8.2/g' \
+                "$file"
+
+              sed -i -E \
+                's/(com\.android\.application[[:space:]]*=[[:space:]]*")[^"]*9\.[0-9.]+/\18.8.2/g' \
+                "$file"
+
+              sed -i -E \
+                's/(com\.android\.library[[:space:]]*=[[:space:]]*")[^"]*9\.[0-9.]+/\18.8.2/g' \
+                "$file"
+
+              sed -i -E \
+                's/(id\(["'\'']com\.android\.application["'\'']\)[[:space:]]+version[[:space:]]+["'\''])9\.[0-9.]+/\18.8.2/g' \
+                "$file"
+
+              sed -i -E \
+                's/(id\(["'\'']com\.android\.library["'\'']\)[[:space:]]+version[[:space:]]+["'\''])9\.[0-9.]+/\18.8.2/g' \
+                "$file"
+
+              sed -i -E \
+                's/(id[[:space:]]+["'\'']com\.android\.application["'\''][[:space:]]+version[[:space:]]+["'\''])9\.[0-9.]+/\18.8.2/g' \
+                "$file"
+
+              sed -i -E \
+                's/(id[[:space:]]+["'\'']com\.android\.library["'\''][[:space:]]+version[[:space:]]+["'\''])9\.[0-9.]+/\18.8.2/g' \
+                "$file"
+
+            done
+
+          echo ""
+          echo "========================================"
+          echo "Final Android Gradle configuration"
+          echo "========================================"
+
+          echo ""
+          echo "--- gradle.properties ---"
           cat "$GRADLE_PROPERTIES"
 
           echo ""
-          echo "=== Verifying AGP compatibility setting ==="
-          grep '^android.newDsl=false$' "$GRADLE_PROPERTIES"
+          echo "--- gradle-wrapper.properties ---"
+          cat android/gradle/wrapper/gradle-wrapper.properties || true
+
+          echo ""
+          echo "--- AGP references after patch ---"
+
+          grep -R \
+            -n \
+            -E \
+            'com\.android\.application|com\.android\.library|com\.android\.tools\.build:gradle|androidGradlePlugin' \
+            android \
+            --include="*.gradle" \
+            --include="*.gradle.kts" \
+            --include="*.toml" || true
+
+          echo ""
+          echo "--- Checking for remaining AGP 9 references ---"
+
+          if grep -R \
+            -n \
+            -E \
+            '(com\.android\.application|com\.android\.library).*9\.|com\.android\.tools\.build:gradle:9\.' \
+            android \
+            --include="*.gradle" \
+            --include="*.gradle.kts" \
+            --include="*.toml"; then
+
+            echo ""
+            echo "ERROR: AGP 9 references are still present."
+            exit 1
+          fi
+
+          echo ""
+          echo "AGP compatibility patch completed successfully."
 
       - name: Clean Flutter and Gradle caches
         working-directory: ${{ env.PROJECT_DIR }}
@@ -230,24 +352,6 @@ jobs:
             --release \
             --verbose
 
-      - name: Show generated APK files
-        working-directory: ${{ env.PROJECT_DIR }}
-        run: |
-          echo "Generated APK files:"
-
-          find build/app/outputs/flutter-apk \
-            -type f \
-            -name "*.apk" \
-            -print \
-            -exec ls -lh {} \;
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: Ycash-Wallet-Release-APK
-          path: ${{ env.PROJECT_DIR }}/build/app/outputs/flutter-apk/*.apk
-          if-no-files-found: error
-          retention-days: 30
       - name: Show generated APK files
         working-directory: ${{ env.PROJECT_DIR }}
         run: |
