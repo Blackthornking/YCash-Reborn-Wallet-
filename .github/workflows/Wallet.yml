@@ -25,6 +25,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+
+      # ========================================
+      # SHOW FILES
+      # ========================================
+
       - name: Show repository contents
         run: |
           echo "========================================"
@@ -35,7 +40,12 @@ jobs:
 
           echo ""
           echo "ZIP files found:"
-          find . -maxdepth 3 -type f -iname "*.zip" -print
+
+          find . \
+            -maxdepth 3 \
+            -type f \
+            -iname "*.zip" \
+            -print
 
 
       # ========================================
@@ -46,14 +56,22 @@ jobs:
         run: |
           set -e
 
-          ZIP_FILE=$(find . -maxdepth 3 -type f -iname "*.zip" | head -n 1)
+          echo "========================================"
+          echo "LOCATING PROJECT ZIP"
+          echo "========================================"
+
+          ZIP_FILE=$(find . \
+            -maxdepth 3 \
+            -type f \
+            -iname "*.zip" \
+            | head -n 1)
 
           if [ -z "$ZIP_FILE" ]; then
-            echo "ERROR: No ZIP file found."
+            echo "ERROR: No ZIP file was found."
             exit 1
           fi
 
-          echo "Using ZIP file:"
+          echo "Using ZIP:"
           echo "$ZIP_FILE"
 
           rm -rf extracted_project
@@ -63,17 +81,21 @@ jobs:
 
           echo ""
           echo "========================================"
-          echo "EXTRACTED DIRECTORY STRUCTURE"
+          echo "EXTRACTED DIRECTORIES"
           echo "========================================"
 
-          find extracted_project -maxdepth 5 -type d -print | sort
+          find extracted_project \
+            -maxdepth 5 \
+            -type d \
+            -print
 
           echo ""
           echo "========================================"
-          echo "IMPORTANT PROJECT FILES"
+          echo "IMPORTANT FILES"
           echo "========================================"
 
-          find extracted_project -maxdepth 12 \
+          find extracted_project \
+            -maxdepth 10 \
             -type f \
             \( \
               -name "pubspec.yaml" \
@@ -83,9 +105,8 @@ jobs:
               -o -name "build.gradle" \
               -o -name "build.gradle.kts" \
               -o -name "gradle-wrapper.properties" \
-              -o -name "libs.versions.toml" \
             \) \
-            -print | sort
+            -print
 
 
       # ========================================
@@ -98,18 +119,28 @@ jobs:
 
           SEARCH_ROOT="$GITHUB_WORKSPACE/extracted_project"
 
-          PROJECT_DIR=""
-
           echo "Searching for Flutter project..."
 
-          # Prefer a pubspec.yaml with an Android directory
+          PROJECT_DIR=""
+
           while IFS= read -r PUBSPEC; do
+
             DIR=$(dirname "$PUBSPEC")
 
+            echo "Checking:"
+            echo "$DIR"
+
             if [ -d "$DIR/android" ]; then
+
               PROJECT_DIR="$DIR"
+
+              echo ""
+              echo "Flutter project found:"
+              echo "$PROJECT_DIR"
+
               break
             fi
+
           done < <(
             find "$SEARCH_ROOT" \
               -type f \
@@ -119,11 +150,16 @@ jobs:
           )
 
           if [ -z "$PROJECT_DIR" ]; then
-            echo "ERROR: Could not find Flutter project."
+
+            echo "ERROR: Could not locate Flutter project."
 
             echo ""
             echo "pubspec.yaml files found:"
-            find "$SEARCH_ROOT" -type f -name "pubspec.yaml" -print
+
+            find "$SEARCH_ROOT" \
+              -type f \
+              -name "pubspec.yaml" \
+              -print
 
             exit 1
           fi
@@ -132,17 +168,20 @@ jobs:
 
           echo ""
           echo "========================================"
-          echo "FLUTTER PROJECT FOUND"
+          echo "PROJECT STRUCTURE"
           echo "========================================"
 
+          echo "Project:"
           echo "$PROJECT_DIR"
 
           echo ""
-          echo "Project contents:"
+          echo "--- Project files ---"
+
           ls -lah "$PROJECT_DIR"
 
           echo ""
-          echo "Android contents:"
+          echo "--- Android files ---"
+
           ls -lah "$PROJECT_DIR/android"
 
 
@@ -168,24 +207,32 @@ jobs:
         run: |
           set -e
 
+          echo "ANDROID_HOME=$ANDROID_HOME"
+
           yes | sdkmanager --licenses || true
 
           sdkmanager \
             "platform-tools" \
             "platforms;android-35" \
-            "platforms;android-36" \
             "build-tools;35.0.0" \
-            "build-tools;36.0.0" \
             "ndk;29.0.14206865"
+
+
+      # ========================================
+      # ANDROID ENVIRONMENT
+      # ========================================
 
       - name: Configure Android environment
         run: |
+          set -e
+
           echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
+
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/29.0.14206865" >> "$GITHUB_ENV"
+
           echo "NDK_HOME=$ANDROID_HOME/ndk/29.0.14206865" >> "$GITHUB_ENV"
 
           echo "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
-          echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
 
 
       # ========================================
@@ -225,106 +272,37 @@ jobs:
           echo "========================================"
           echo "JAVA"
           echo "========================================"
+
           java -version
 
           echo ""
           echo "========================================"
           echo "FLUTTER"
           echo "========================================"
+
           flutter --version
 
           echo ""
           echo "========================================"
           echo "RUST"
           echo "========================================"
+
           rustc --version
           cargo --version
           cargo ndk --version
 
           echo ""
           echo "========================================"
-          echo "ANDROID SDK"
+          echo "ANDROID"
           echo "========================================"
+
           echo "ANDROID_HOME=$ANDROID_HOME"
+
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/29.0.14206865"
 
 
       # ========================================
-      # CREATE GRADLE WRAPPER SAFELY
-      # ========================================
-
-      - name: Create Gradle wrapper if missing
-        working-directory: ${{ env.PROJECT_DIR }}
-        run: |
-          set -e
-
-          cd android
-
-          echo "========================================"
-          echo "CHECKING GRADLE WRAPPER"
-          echo "========================================"
-
-          ls -lah
-
-          if [ -f "./gradlew" ]; then
-            echo ""
-            echo "Gradle wrapper already exists."
-
-            chmod +x ./gradlew
-
-            exit 0
-          fi
-
-          echo ""
-          echo "Gradle wrapper missing."
-          echo "Creating wrapper in an ISOLATED directory..."
-
-          TEMP_DIR=$(mktemp -d)
-
-          echo "Temporary directory:"
-          echo "$TEMP_DIR"
-
-          cd "$TEMP_DIR"
-
-          # Download standalone Gradle distribution.
-          wget -q \
-            https://services.gradle.org/distributions/gradle-8.9-bin.zip \
-            -O gradle.zip
-
-          unzip -q gradle.zip
-
-          GRADLE_BIN="$TEMP_DIR/gradle-8.9/bin/gradle"
-
-          chmod +x "$GRADLE_BIN"
-
-          echo ""
-          echo "Creating wrapper WITHOUT evaluating the Flutter project..."
-
-          "$GRADLE_BIN" wrapper \
-            --gradle-version 8.9 \
-            --distribution-type bin
-
-          echo ""
-          echo "Copying wrapper files into Android project..."
-
-          cp gradlew "$PROJECT_DIR/android/gradlew"
-          chmod +x "$PROJECT_DIR/android/gradlew"
-
-          cp -r gradle "$PROJECT_DIR/android/"
-
-          echo ""
-          echo "========================================"
-          echo "GRADLE WRAPPER CREATED"
-          echo "========================================"
-
-          ls -lah "$PROJECT_DIR/android"
-
-          echo ""
-          cat "$PROJECT_DIR/android/gradle/wrapper/gradle-wrapper.properties"
-
-
-      # ========================================
-      # GET DEPENDENCIES
+      # FLUTTER DEPENDENCIES
       # ========================================
 
       - name: Get Flutter dependencies
@@ -334,28 +312,149 @@ jobs:
 
 
       # ========================================
-      # SHOW ANDROID CONFIGURATION
+      # SHOW ANDROID CONFIG
       # ========================================
 
       - name: Check Android project structure
         working-directory: ${{ env.PROJECT_DIR }}
         run: |
           echo "========================================"
-          echo "ANDROID PROJECT FILES"
+          echo "ANDROID DIRECTORY"
           echo "========================================"
 
           find android \
-            -maxdepth 5 \
+            -maxdepth 4 \
+            -type f \
+            -print \
+            | sort
+
+          echo ""
+          echo "========================================"
+          echo "ANDROID DIRECTORY CONTENTS"
+          echo "========================================"
+
+          ls -lah android
+
+
+      # ========================================
+      # CREATE GRADLE WRAPPER IF MISSING
+      # ========================================
+
+      - name: Create Gradle wrapper if missing
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          set -e
+
+          echo "========================================"
+          echo "CHECKING GRADLE WRAPPER"
+          echo "========================================"
+
+          ls -lah android
+
+          if [ -f "android/gradlew" ]; then
+
+            echo ""
+            echo "Gradle wrapper already exists."
+
+            chmod +x android/gradlew
+
+            exit 0
+          fi
+
+          echo ""
+          echo "Gradle wrapper is missing."
+          echo "Creating a standalone minimal Gradle project..."
+
+          TEMP_DIR=$(mktemp -d)
+
+          echo "Temporary directory:"
+          echo "$TEMP_DIR"
+
+          mkdir -p "$TEMP_DIR/gradle"
+
+          cat > "$TEMP_DIR/settings.gradle.kts" <<'EOF'
+          rootProject.name = "wrapper-generator"
+          EOF
+
+          cat > "$TEMP_DIR/build.gradle.kts" <<'EOF'
+          plugins {
+          }
+          EOF
+
+          echo ""
+          echo "Downloading Gradle 8.9..."
+
+          curl \
+            --fail \
+            --location \
+            --retry 3 \
+            --output "$TEMP_DIR/gradle-8.9-bin.zip" \
+            https://services.gradle.org/distributions/gradle-8.9-bin.zip
+
+          unzip -q \
+            "$TEMP_DIR/gradle-8.9-bin.zip" \
+            -d "$TEMP_DIR"
+
+          echo ""
+          echo "Generating Gradle wrapper..."
+
+          (
+            cd "$TEMP_DIR"
+
+            "./gradle-8.9/bin/gradle" \
+              wrapper \
+              --gradle-version 8.9 \
+              --distribution-type bin \
+              --no-daemon
+          )
+
+          echo ""
+          echo "Generated wrapper files:"
+
+          find "$TEMP_DIR" \
+            -maxdepth 4 \
             -type f \
             \( \
               -name "gradlew" \
-              -o -name "*.gradle" \
-              -o -name "*.gradle.kts" \
-              -o -name "*.toml" \
-              -o -name "gradle.properties" \
+              -o -name "gradlew.bat" \
+              -o -name "gradle-wrapper.jar" \
               -o -name "gradle-wrapper.properties" \
             \) \
-            -print | sort
+            -print
+
+          echo ""
+          echo "Copying wrapper into Flutter Android project..."
+
+          mkdir -p android/gradle/wrapper
+
+          cp "$TEMP_DIR/gradlew" \
+            android/gradlew
+
+          cp "$TEMP_DIR/gradlew.bat" \
+            android/gradlew.bat
+
+          cp "$TEMP_DIR/gradle/wrapper/gradle-wrapper.jar" \
+            android/gradle/wrapper/gradle-wrapper.jar
+
+          cp "$TEMP_DIR/gradle/wrapper/gradle-wrapper.properties" \
+            android/gradle/wrapper/gradle-wrapper.properties
+
+          chmod +x android/gradlew
+
+          echo ""
+          echo "========================================"
+          echo "GRADLE WRAPPER CREATED SUCCESSFULLY"
+          echo "========================================"
+
+          find android \
+            -maxdepth 3 \
+            -type f \
+            \( \
+              -name "gradlew" \
+              -o -name "gradle-wrapper.jar" \
+              -o -name "gradle-wrapper.properties" \
+            \) \
+            -print
 
 
       # ========================================
@@ -367,28 +466,36 @@ jobs:
         run: |
           set -e
 
-          AGP_VERSION="8.7.3"
+          echo "========================================"
+          echo "ANDROID CONFIGURATION BEFORE PATCH"
+          echo "========================================"
 
-          echo "========================================"
-          echo "PATCHING ANDROID GRADLE PLUGIN"
-          echo "========================================"
+          grep -Rni \
+            -E \
+            'com\.android\.application|com\.android\.library|com\.android\.tools\.build|androidGradlePlugin|agp[[:space:]]*=' \
+            android \
+            --include="*.gradle" \
+            --include="*.gradle.kts" \
+            --include="*.toml" || true
 
           echo ""
-          echo "AGP target version: $AGP_VERSION"
+          echo "Removing incompatible android.newDsl..."
 
           touch android/gradle.properties
 
-          # Remove AGP 9-only DSL flag
           sed -i \
             '/^[[:space:]]*android\.newDsl[[:space:]]*=/d' \
             android/gradle.properties
 
-          # Ensure wrapper uses Gradle 8.9
-          mkdir -p android/gradle/wrapper
+          echo ""
+          echo "Setting Gradle wrapper to 8.9..."
 
           sed -i \
             's#^distributionUrl=.*#distributionUrl=https\://services.gradle.org/distributions/gradle-8.9-bin.zip#' \
             android/gradle/wrapper/gradle-wrapper.properties
+
+          echo ""
+          echo "Replacing AGP 9 with AGP 8.7.3..."
 
           python3 <<'PYTHON'
           import os
@@ -396,11 +503,17 @@ jobs:
 
           AGP_VERSION = "8.7.3"
 
-          for root, dirs, files in os.walk("android"):
-              for filename in files:
-                  if not filename.endswith(
-                      (".gradle", ".gradle.kts", ".toml")
-                  ):
+          extensions = (
+              ".gradle",
+              ".gradle.kts",
+              ".toml",
+          )
+
+          for root, dirs, filenames in os.walk("android"):
+
+              for filename in filenames:
+
+                  if not filename.endswith(extensions):
                       continue
 
                   path = os.path.join(root, filename)
@@ -410,55 +523,59 @@ jobs:
 
                   text = original
 
-                  # Maven classpath format
+                  # Traditional Gradle classpath
                   text = re.sub(
-                      r'com\.android\.tools\.build:gradle:[0-9]+\.[0-9]+\.[0-9]+',
+                      r'com\.android\.tools\.build:gradle:9\.[0-9.]+',
                       f'com.android.tools.build:gradle:{AGP_VERSION}',
                       text
                   )
 
-                  # Kotlin plugin syntax
+                  # Kotlin DSL application plugin
                   text = re.sub(
-                      r'(id\(\s*["\']com\.android\.application["\']\s*\)\s*version\s*["\'])[0-9]+\.[0-9]+\.[0-9]+',
+                      r'(id\(\s*["\']com\.android\.application["\']\s*\)\s*version\s*["\'])9\.[0-9.]+',
                       rf'\g<1>{AGP_VERSION}',
                       text
                   )
 
+                  # Kotlin DSL library plugin
                   text = re.sub(
-                      r'(id\(\s*["\']com\.android\.library["\']\s*\)\s*version\s*["\'])[0-9]+\.[0-9]+\.[0-9]+',
+                      r'(id\(\s*["\']com\.android\.library["\']\s*\)\s*version\s*["\'])9\.[0-9.]+',
                       rf'\g<1>{AGP_VERSION}',
                       text
                   )
 
-                  # Groovy plugin syntax
+                  # Groovy application plugin
                   text = re.sub(
-                      r'(id\s+["\']com\.android\.application["\']\s+version\s+["\'])[0-9]+\.[0-9]+\.[0-9]+',
+                      r'(id\s+["\']com\.android\.application["\']\s+version\s+["\'])9\.[0-9.]+',
                       rf'\g<1>{AGP_VERSION}',
                       text
                   )
 
+                  # Groovy library plugin
                   text = re.sub(
-                      r'(id\s+["\']com\.android\.library["\']\s+version\s+["\'])[0-9]+\.[0-9]+\.[0-9]+',
+                      r'(id\s+["\']com\.android\.library["\']\s+version\s+["\'])9\.[0-9.]+',
                       rf'\g<1>{AGP_VERSION}',
                       text
                   )
 
                   # Version catalog
                   text = re.sub(
-                      r'(^\s*agp\s*=\s*["\'])[0-9]+\.[0-9]+\.[0-9]+',
+                      r'(^\s*agp\s*=\s*["\'])9\.[0-9.]+',
                       rf'\g<1>{AGP_VERSION}',
                       text,
                       flags=re.MULTILINE
                   )
 
+                  # Alternative version variable
                   text = re.sub(
-                      r'(^\s*androidGradlePlugin\s*=\s*["\'])[0-9]+\.[0-9]+\.[0-9]+',
+                      r'(^\s*androidGradlePlugin\s*=\s*["\'])9\.[0-9.]+',
                       rf'\g<1>{AGP_VERSION}',
                       text,
                       flags=re.MULTILINE
                   )
 
                   if text != original:
+
                       print(f"PATCHED: {path}")
 
                       with open(path, "w", encoding="utf-8") as f:
@@ -468,9 +585,18 @@ jobs:
           print("AGP patch completed.")
           PYTHON
 
-          echo ""
+
+      # ========================================
+      # VERIFY AGP
+      # ========================================
+
+      - name: Verify Android Gradle configuration
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          set -e
+
           echo "========================================"
-          echo "FINAL GRADLE WRAPPER"
+          echo "GRADLE WRAPPER"
           echo "========================================"
 
           cat android/gradle/wrapper/gradle-wrapper.properties
@@ -482,22 +608,13 @@ jobs:
 
           grep -Rni \
             -E \
-            'com\.android\.application|com\.android\.library|com\.android\.tools\.build|androidGradlePlugin|^[[:space:]]*agp[[:space:]]*=' \
+            'com\.android\.application|com\.android\.library|com\.android\.tools\.build|androidGradlePlugin|agp[[:space:]]*=' \
             android \
             --include="*.gradle" \
             --include="*.gradle.kts" \
             --include="*.toml" || true
 
-
-      # ========================================
-      # CHECK FOR AGP 9
-      # ========================================
-
-      - name: Check for remaining AGP 9 references
-        working-directory: ${{ env.PROJECT_DIR }}
-        run: |
-          set -e
-
+          echo ""
           echo "========================================"
           echo "CHECKING FOR AGP 9"
           echo "========================================"
@@ -512,9 +629,11 @@ jobs:
 
             echo ""
             echo "ERROR: AGP 9 reference still exists."
+
             exit 1
           fi
 
+          echo ""
           echo "SUCCESS: No AGP 9 references found."
 
 
@@ -536,27 +655,42 @@ jobs:
 
 
       # ========================================
-      # VERIFY GRADLE
+      # VERIFY WRAPPER
       # ========================================
 
-      - name: Verify Gradle wrapper and version
+      - name: Verify Gradle wrapper
         working-directory: ${{ env.PROJECT_DIR }}/android
         run: |
           set -e
 
           echo "========================================"
-          echo "VERIFYING GRADLE"
+          echo "ANDROID DIRECTORY"
           echo "========================================"
 
           pwd
+
           ls -lah
+
+          echo ""
 
           if [ ! -f "./gradlew" ]; then
             echo "ERROR: gradlew is still missing."
+
+            find . \
+              -maxdepth 4 \
+              -type f \
+              -print \
+              | sort
+
             exit 1
           fi
 
           chmod +x ./gradlew
+
+          echo ""
+          echo "========================================"
+          echo "GRADLE VERSION"
+          echo "========================================"
 
           ./gradlew --version
 
@@ -568,6 +702,8 @@ jobs:
       - name: Build Flutter APK
         working-directory: ${{ env.PROJECT_DIR }}
         run: |
+          set -e
+
           flutter build apk \
             --release \
             --verbose
@@ -584,7 +720,7 @@ jobs:
           echo "GENERATED APK FILES"
           echo "========================================"
 
-          find build/app/outputs/flutter-apk \
+          find build/app/outputs \
             -type f \
             -name "*.apk" \
             -print \
@@ -599,6 +735,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Ycash-Wallet-Release-APK
-          path: ${{ env.PROJECT_DIR }}/build/app/outputs/flutter-apk/*.apk
+          path: |
+            ${{ env.PROJECT_DIR }}/build/app/outputs/flutter-apk/*.apk
+            ${{ env.PROJECT_DIR }}/build/app/outputs/apk/release/*.apk
           if-no-files-found: error
           retention-days: 30
