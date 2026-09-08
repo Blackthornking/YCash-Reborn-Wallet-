@@ -10,7 +10,7 @@ name: Build Android APK
   pull_request: {}
 
 permissions:
-contents: read
+ contents: read
 
 jobs:
 build:
