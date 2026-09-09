@@ -123,6 +123,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             unzip \
+            curl \
             protobuf-compiler \
             clang \
             pkg-config \
@@ -136,9 +137,79 @@ jobs:
             armv7-linux-androideabi
             x86_64-linux-android
 
+      - name: Download external Ycash parameters
+        working-directory: ${{ steps.project.outputs.path }}
+        shell: bash
+        env:
+          YCASHPARAM_SPEND_URL: ${{ secrets.YCASHPARAM_SPEND_URL }}
+          YCASHPARAM_OUTPUT_URL: ${{ secrets.YCASHPARAM_OUTPUT_URL }}
+          YCASHPARAM_SPEND_SHA256: ${{ secrets.YCASHPARAM_SPEND_SHA256 }}
+          YCASHPARAM_OUTPUT_SHA256: ${{ secrets.YCASHPARAM_OUTPUT_SHA256 }}
+        run: |
+          set -euo pipefail
+
+          PARAM_DIR="packages/ycash_core_ffi/rust/vendor/yecshell-lib/zcash-params"
+
+          mkdir -p "$PARAM_DIR"
+
+          : "${YCASHPARAM_SPEND_URL:?Missing YCASHPARAM_SPEND_URL secret}"
+          : "${YCASHPARAM_OUTPUT_URL:?Missing YCASHPARAM_OUTPUT_URL secret}"
+          : "${YCASHPARAM_SPEND_SHA256:?Missing YCASHPARAM_SPEND_SHA256 secret}"
+          : "${YCASHPARAM_OUTPUT_SHA256:?Missing YCASHPARAM_OUTPUT_SHA256 secret}"
+
+          echo "Downloading external Ycash Sapling parameters..."
+
+          curl \
+            --fail \
+            --location \
+            --retry 3 \
+            --retry-delay 2 \
+            --silent \
+            --show-error \
+            "$YCASHPARAM_SPEND_URL" \
+            --output "$PARAM_DIR/sapling-spend.params"
+
+          curl \
+            --fail \
+            --location \
+            --retry 3 \
+            --retry-delay 2 \
+            --silent \
+            --show-error \
+            "$YCASHPARAM_OUTPUT_URL" \
+            --output "$PARAM_DIR/sapling-output.params"
+
+          echo "Verifying Sapling spend parameter..."
+          echo "$YCASHPARAM_SPEND_SHA256  $PARAM_DIR/sapling-spend.params" \
+            | sha256sum --check
+
+          echo "Verifying Sapling output parameter..."
+          echo "$YCASHPARAM_OUTPUT_SHA256  $PARAM_DIR/sapling-output.params" \
+            | sha256sum --check
+
+          echo "External Ycash parameters verified successfully."
+
+          ls -lh \
+            "$PARAM_DIR/sapling-spend.params" \
+            "$PARAM_DIR/sapling-output.params"
+
+      - name: Verify external parameters are not empty
+        working-directory: ${{ steps.project.outputs.path }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          PARAM_DIR="packages/ycash_core_ffi/rust/vendor/yecshell-lib/zcash-params"
+
+          test -s "$PARAM_DIR/sapling-spend.params"
+          test -s "$PARAM_DIR/sapling-output.params"
+
+          echo "Parameter files are present and non-empty."
+
       - name: Install cargo-ndk
         shell: bash
         run: |
+          set -euo pipefail
           cargo install cargo-ndk --locked
 
       - name: Verify toolchain
@@ -158,6 +229,7 @@ jobs:
         shell: bash
         run: |
           pwd
+
           echo "Top-level files:"
           ls -la
 
@@ -225,6 +297,8 @@ jobs:
         working-directory: ${{ steps.project.outputs.path }}
         shell: bash
         run: |
+          set -euo pipefail
+
           flutter build apk --release --verbose
 
       - name: Find generated APK
@@ -241,7 +315,10 @@ jobs:
 
           if [ -z "$APK_FILE" ]; then
             echo "ERROR: app-release.apk was not found."
-            find "$GITHUB_WORKSPACE/project" -type f -name "*.apk" -print || true
+            find "$GITHUB_WORKSPACE/project" \
+              -type f \
+              -name "*.apk" \
+              -print || true
             exit 1
           fi
 
@@ -270,7 +347,10 @@ jobs:
 
           if [ ! -x "$APKSIGNER" ]; then
             echo "ERROR: apksigner not found."
-            find "$ANDROID_HOME/build-tools" -name apksigner -type f -print
+            find "$ANDROID_HOME/build-tools" \
+              -name apksigner \
+              -type f \
+              -print
             exit 1
           fi
 
