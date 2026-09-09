@@ -1,13 +1,13 @@
 name: Build Android APK
 
-"on":
-workflow_dispatch: {}
+on:
+workflow_dispatch:
 
 push:
 branches:
 - main
 
-pull_request: {}
+pull_request:
 
 permissions:
 contents: read
@@ -18,6 +18,7 @@ name: Build Flutter APK
 runs-on: ubuntu-latest
 
 steps:
+
   # ========================================
   # CHECKOUT AND EXTRACT PROJECT
   # ========================================
@@ -85,7 +86,7 @@ steps:
       echo "path=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
 
   # ========================================
-  # JAVA / ANDROID
+  # JAVA AND ANDROID SDK
   # ========================================
 
   - name: Set up Java 17
@@ -141,7 +142,7 @@ steps:
         libssl-dev
 
   # ========================================
-  # RUST / ANDROID FFI
+  # RUST AND CARGO NDK
   # ========================================
 
   - name: Set up Rust
@@ -168,6 +169,10 @@ steps:
 
       echo "ANDROID_HOME=$ANDROID_HOME"
       echo "ANDROID_NDK_HOME=$ANDROID_NDK_HOME"
+
+  # ========================================
+  # PROJECT INSPECTION
+  # ========================================
 
   - name: Show project structure
     working-directory: ${{ steps.project.outputs.path }}
@@ -202,7 +207,7 @@ steps:
     run: |
       set -euo pipefail
 
-      echo "Searching for warp_api_ffi Cargo.toml..."
+      echo "Searching for warp_api_ffi..."
 
       WARP_CARGO=$(find . \
         -type f \
@@ -212,7 +217,7 @@ steps:
         | head -n 1 || true)
 
       if [ -z "$WARP_CARGO" ]; then
-        echo "ERROR: Could not find Cargo.toml containing package warp_api_ffi."
+        echo "ERROR: Could not find Cargo.toml for warp_api_ffi."
 
         echo "Available Cargo.toml files:"
         find . -type f -name "Cargo.toml" -print
@@ -222,13 +227,11 @@ steps:
 
       WARP_DIR=$(dirname "$WARP_CARGO")
 
-      echo "Found Warp API FFI:"
-      echo "$WARP_DIR"
-
+      echo "Found Warp API FFI directory: $WARP_DIR"
       echo "path=$WARP_DIR" >> "$GITHUB_OUTPUT"
 
   # ========================================
-  # BUILD WARP FFI FOR ANDROID
+  # PREPARE JNI LIBRARY DIRECTORY
   # ========================================
 
   - name: Prepare JNI libraries directory
@@ -237,8 +240,11 @@ steps:
     run: |
       set -euo pipefail
 
-      rm -rf android/app/src/main/jniLibs
       mkdir -p android/app/src/main/jniLibs
+
+  # ========================================
+  # BUILD WARP API FFI
+  # ========================================
 
   - name: Build Warp FFI for arm64-v8a
     working-directory: ${{ steps.project.outputs.path }}/${{ steps.warp.outputs.path }}
@@ -277,7 +283,7 @@ steps:
         --release
 
   # ========================================
-  # VERIFY NATIVE WARP LIBRARIES
+  # VERIFY GENERATED LIBRARIES
   # ========================================
 
   - name: Show generated JNI libraries
@@ -297,12 +303,7 @@ steps:
         LIB="android/app/src/main/jniLibs/$ABI/libwarp_api_ffi.so"
 
         if [ ! -f "$LIB" ]; then
-          echo "ERROR: Missing native Warp library:"
-          echo "$LIB"
-
-          echo "Contents of JNI directory:"
-          find android/app/src/main/jniLibs -type f -print || true
-
+          echo "ERROR: Missing native library: $LIB"
           exit 1
         fi
 
@@ -311,10 +312,8 @@ steps:
         file "$LIB"
       done
 
-      echo "All Warp FFI native libraries verified."
-
   # ========================================
-  # TEST SIGNING KEY
+  # SIGNING KEY
   # ========================================
 
   - name: Create temporary test signing key
@@ -351,15 +350,8 @@ steps:
       storeFile=temp-release-key.jks
       EOF
 
-  - name: Verify signing files
-    working-directory: ${{ steps.project.outputs.path }}
-    shell: bash
-    run: |
-      ls -lh android/app/temp-release-key.jks
-      echo "Signing configuration created."
-
   # ========================================
-  # ANALYZE AND BUILD
+  # ANALYZE
   # ========================================
 
   - name: Analyze Dart source
@@ -368,6 +360,10 @@ steps:
     run: |
       flutter analyze || true
 
+  # ========================================
+  # BUILD APK
+  # ========================================
+
   - name: Build release APK
     working-directory: ${{ steps.project.outputs.path }}
     shell: bash
@@ -375,10 +371,6 @@ steps:
       set -euo pipefail
 
       flutter build apk --release --verbose
-
-  # ========================================
-  # FIND APK
-  # ========================================
 
   - name: Find generated APK
     id: apk
@@ -424,9 +416,8 @@ steps:
 
       APK="$GITHUB_WORKSPACE/release/Ycash-Reborn.apk"
 
-      echo "Checking APK contents for libwarp_api_ffi.so..."
+      echo "Checking APK for libwarp_api_ffi.so..."
 
-      echo "Matching libraries:"
       unzip -l "$APK" | grep "libwarp_api_ffi.so" || true
 
       for ABI in arm64-v8a armeabi-v7a x86_64; do
@@ -437,10 +428,10 @@ steps:
           exit 1
         fi
 
-        echo "FOUND inside APK: $LIB_PATH"
+        echo "FOUND: $LIB_PATH"
       done
 
-      echo "Warp FFI APK packaging verification PASSED."
+      echo "Warp FFI packaging verification PASSED."
 
   # ========================================
   # VERIFY APK SIGNATURE
@@ -454,12 +445,6 @@ steps:
       APK="$GITHUB_WORKSPACE/release/Ycash-Reborn.apk"
       APKSIGNER="$ANDROID_HOME/build-tools/36.0.0/apksigner"
 
-      if [ ! -x "$APKSIGNER" ]; then
-        echo "ERROR: apksigner not found."
-        find "$ANDROID_HOME/build-tools" -name apksigner -type f -print
-        exit 1
-      fi
-
       "$APKSIGNER" verify \
         --verbose \
         --print-certs \
@@ -468,7 +453,7 @@ steps:
       echo "APK signature verification PASSED."
 
   # ========================================
-  # CHECKSUMS
+  # INTEGRITY CHECKS
   # ========================================
 
   - name: Generate APK integrity checksums
@@ -496,14 +481,14 @@ steps:
 
       echo "APK integrity verification PASSED."
 
+  # ========================================
+  # SHOW AND UPLOAD RELEASE
+  # ========================================
+
   - name: Show release files
     shell: bash
     run: |
       ls -lh "$GITHUB_WORKSPACE/release"
-
-  # ========================================
-  # UPLOAD RELEASE
-  # ========================================
 
   - name: Upload APK and integrity files
     uses: actions/upload-artifact@v4
