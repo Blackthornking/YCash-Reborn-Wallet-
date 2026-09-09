@@ -124,6 +124,7 @@ jobs:
           sudo apt-get install -y \
             unzip \
             curl \
+            file \
             protobuf-compiler \
             clang \
             pkg-config \
@@ -137,14 +138,9 @@ jobs:
             armv7-linux-androideabi
             x86_64-linux-android
 
-      - name: Download external Ycash parameters
+      - name: Download external Ycash parameters from Google Drive
         working-directory: ${{ steps.project.outputs.path }}
         shell: bash
-        env:
-          YCASHPARAM_SPEND_URL: ${{ secrets.YCASHPARAM_SPEND_URL }}
-          YCASHPARAM_OUTPUT_URL: ${{ secrets.YCASHPARAM_OUTPUT_URL }}
-          YCASHPARAM_SPEND_SHA256: ${{ secrets.YCASHPARAM_SPEND_SHA256 }}
-          YCASHPARAM_OUTPUT_SHA256: ${{ secrets.YCASHPARAM_OUTPUT_SHA256 }}
         run: |
           set -euo pipefail
 
@@ -152,48 +148,68 @@ jobs:
 
           mkdir -p "$PARAM_DIR"
 
-          : "${YCASHPARAM_SPEND_URL:?Missing YCASHPARAM_SPEND_URL secret}"
-          : "${YCASHPARAM_OUTPUT_URL:?Missing YCASHPARAM_OUTPUT_URL secret}"
-          : "${YCASHPARAM_SPEND_SHA256:?Missing YCASHPARAM_SPEND_SHA256 secret}"
-          : "${YCASHPARAM_OUTPUT_SHA256:?Missing YCASHPARAM_OUTPUT_SHA256 secret}"
+          SPEND_ID="1OfbiqE2uzdJqxFfC8s8h0l_s4KT8_Io6"
+          OUTPUT_ID="1T02YAgRo3Rx6ksXphGuDKadkV5K49RW2"
 
-          echo "Downloading external Ycash Sapling parameters..."
+          SPEND_URL="https://drive.usercontent.google.com/download?id=${SPEND_ID}&export=download&confirm=t"
+          OUTPUT_URL="https://drive.usercontent.google.com/download?id=${OUTPUT_ID}&export=download&confirm=t"
+
+          echo "Downloading external Ycash Sapling spend parameter..."
 
           curl \
             --fail \
             --location \
-            --retry 3 \
-            --retry-delay 2 \
+            --retry 5 \
+            --retry-delay 3 \
             --silent \
             --show-error \
-            "$YCASHPARAM_SPEND_URL" \
+            "$SPEND_URL" \
             --output "$PARAM_DIR/sapling-spend.params"
 
+          echo "Downloading external Ycash Sapling output parameter..."
+
           curl \
             --fail \
             --location \
-            --retry 3 \
-            --retry-delay 2 \
+            --retry 5 \
+            --retry-delay 3 \
             --silent \
             --show-error \
-            "$YCASHPARAM_OUTPUT_URL" \
+            "$OUTPUT_URL" \
             --output "$PARAM_DIR/sapling-output.params"
 
-          echo "Verifying Sapling spend parameter..."
-          echo "$YCASHPARAM_SPEND_SHA256  $PARAM_DIR/sapling-spend.params" \
-            | sha256sum --check
+          echo "Checking downloaded parameter files..."
 
-          echo "Verifying Sapling output parameter..."
-          echo "$YCASHPARAM_OUTPUT_SHA256  $PARAM_DIR/sapling-output.params" \
-            | sha256sum --check
+          test -s "$PARAM_DIR/sapling-spend.params"
+          test -s "$PARAM_DIR/sapling-output.params"
 
-          echo "External Ycash parameters verified successfully."
+          SPEND_SIZE=$(stat -c%s "$PARAM_DIR/sapling-spend.params")
+          OUTPUT_SIZE=$(stat -c%s "$PARAM_DIR/sapling-output.params")
 
-          ls -lh \
-            "$PARAM_DIR/sapling-spend.params" \
-            "$PARAM_DIR/sapling-output.params"
+          echo "sapling-spend.params: ${SPEND_SIZE} bytes"
+          echo "sapling-output.params: ${OUTPUT_SIZE} bytes"
 
-      - name: Verify external parameters are not empty
+          echo "Checking file types..."
+
+          SPEND_TYPE=$(file "$PARAM_DIR/sapling-spend.params")
+          OUTPUT_TYPE=$(file "$PARAM_DIR/sapling-output.params")
+
+          echo "$SPEND_TYPE"
+          echo "$OUTPUT_TYPE"
+
+          if echo "$SPEND_TYPE" | grep -qiE 'HTML|text'; then
+            echo "ERROR: Sapling spend download is not a binary parameter file."
+            exit 1
+          fi
+
+          if echo "$OUTPUT_TYPE" | grep -qiE 'HTML|text'; then
+            echo "ERROR: Sapling output download is not a binary parameter file."
+            exit 1
+          fi
+
+          echo "External Ycash parameters downloaded successfully."
+
+      - name: Verify external parameters
         working-directory: ${{ steps.project.outputs.path }}
         shell: bash
         run: |
@@ -204,7 +220,16 @@ jobs:
           test -s "$PARAM_DIR/sapling-spend.params"
           test -s "$PARAM_DIR/sapling-output.params"
 
-          echo "Parameter files are present and non-empty."
+          echo "External Ycash parameters are present."
+
+          ls -lh \
+            "$PARAM_DIR/sapling-spend.params" \
+            "$PARAM_DIR/sapling-output.params"
+
+          echo "SHA-256 checksums of downloaded parameters:"
+          sha256sum \
+            "$PARAM_DIR/sapling-spend.params" \
+            "$PARAM_DIR/sapling-output.params"
 
       - name: Install cargo-ndk
         shell: bash
