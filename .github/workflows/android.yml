@@ -144,20 +144,31 @@ jobs:
         run: |
           set -euo pipefail
 
-          PARAM_DIR="packages/ycash_core_ffi/rust/vendor/yecshell-lib/zcash-params"
+          # Must match the crate whose lib.rs declares #[folder = "zcash-params/"].
+          # The vendored engine was renamed yecshell-lib -> ycash-compat-engine,
+          # and this path was not updated with it. Both steps still "succeeded",
+          # because mkdir -p happily created the old directory from nothing and
+          # filled it, while rust-embed compiled the new crate's empty folder.
+          # The APK then synced perfectly and could not sign a transaction.
+          PARAM_DIR="packages/ycash_core_ffi/rust/vendor/ycash-compat-engine/zcash-params"
+
+          # Fail loudly if that path ever drifts again. The real directory is
+          # committed with a .gitkeep; a wrong path has no such marker, and
+          # without this check mkdir -p silently papers over the mistake.
+          if [ ! -f "$PARAM_DIR/.gitkeep" ]; then
+            echo "ERROR: $PARAM_DIR is not the vendored crate's params folder."
+            echo "Folders containing a zcash-params directory:"
+            find packages -type d -name zcash-params -print
+            exit 1
+          fi
 
           mkdir -p "$PARAM_DIR"
 
           # Canonical Zcash source. Ycash forked post-Sapling and inherited the
           # same trusted setup, which is why the hashes checked in the next step
           # are the standard Zcash ones (see SAPLING_*_HASH in lightclient.rs).
-          #
-          # These replace two Google Drive IDs that were transposed: the file
-          # written as sapling-spend.params was actually the output parameters
-          # and vice versa. Nothing in the build or the app notices that until
-          # a send is attempted, because the loader goes by filename and only
-          # checks the files are non-empty. Using URLs whose filenames match the
-          # files being written removes that failure mode entirely.
+          # Fetching by the same filename the file is written under also removes
+          # any chance of the spend/output pair being transposed.
           BASE_URL="https://download.z.cash/downloads"
 
           for NAME in sapling-spend.params sapling-output.params; do
@@ -181,7 +192,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          PARAM_DIR="packages/ycash_core_ffi/rust/vendor/yecshell-lib/zcash-params"
+          PARAM_DIR="packages/ycash_core_ffi/rust/vendor/ycash-compat-engine/zcash-params"
 
           # Exactly the hashes LightClient::set_sapling_params checks. The old
           # step printed checksums and carried on, so a swapped pair passed
