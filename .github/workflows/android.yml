@@ -138,7 +138,7 @@ jobs:
             armv7-linux-androideabi
             x86_64-linux-android
 
-      - name: Download external Ycash parameters from Google Drive
+      - name: Download Sapling parameters
         working-directory: ${{ steps.project.outputs.path }}
         shell: bash
         run: |
@@ -148,68 +148,34 @@ jobs:
 
           mkdir -p "$PARAM_DIR"
 
-          SPEND_ID="1OfbiqE2uzdJqxFfC8s8h0l_s4KT8_Io6"
-          OUTPUT_ID="1T02YAgRo3Rx6ksXphGuDKadkV5K49RW2"
+          # Canonical Zcash source. Ycash forked post-Sapling and inherited the
+          # same trusted setup, which is why the hashes checked in the next step
+          # are the standard Zcash ones (see SAPLING_*_HASH in lightclient.rs).
+          #
+          # These replace two Google Drive IDs that were transposed: the file
+          # written as sapling-spend.params was actually the output parameters
+          # and vice versa. Nothing in the build or the app notices that until
+          # a send is attempted, because the loader goes by filename and only
+          # checks the files are non-empty. Using URLs whose filenames match the
+          # files being written removes that failure mode entirely.
+          BASE_URL="https://download.z.cash/downloads"
 
-          SPEND_URL="https://drive.usercontent.google.com/download?id=${SPEND_ID}&export=download&confirm=t"
-          OUTPUT_URL="https://drive.usercontent.google.com/download?id=${OUTPUT_ID}&export=download&confirm=t"
+          for NAME in sapling-spend.params sapling-output.params; do
+            echo "Downloading ${NAME}..."
+            curl \
+              --fail \
+              --location \
+              --retry 5 \
+              --retry-delay 3 \
+              --silent \
+              --show-error \
+              "${BASE_URL}/${NAME}" \
+              --output "${PARAM_DIR}/${NAME}"
+          done
 
-          echo "Downloading external Ycash Sapling spend parameter..."
+          echo "Sapling parameters downloaded."
 
-          curl \
-            --fail \
-            --location \
-            --retry 5 \
-            --retry-delay 3 \
-            --silent \
-            --show-error \
-            "$SPEND_URL" \
-            --output "$PARAM_DIR/sapling-spend.params"
-
-          echo "Downloading external Ycash Sapling output parameter..."
-
-          curl \
-            --fail \
-            --location \
-            --retry 5 \
-            --retry-delay 3 \
-            --silent \
-            --show-error \
-            "$OUTPUT_URL" \
-            --output "$PARAM_DIR/sapling-output.params"
-
-          echo "Checking downloaded parameter files..."
-
-          test -s "$PARAM_DIR/sapling-spend.params"
-          test -s "$PARAM_DIR/sapling-output.params"
-
-          SPEND_SIZE=$(stat -c%s "$PARAM_DIR/sapling-spend.params")
-          OUTPUT_SIZE=$(stat -c%s "$PARAM_DIR/sapling-output.params")
-
-          echo "sapling-spend.params: ${SPEND_SIZE} bytes"
-          echo "sapling-output.params: ${OUTPUT_SIZE} bytes"
-
-          echo "Checking file types..."
-
-          SPEND_TYPE=$(file "$PARAM_DIR/sapling-spend.params")
-          OUTPUT_TYPE=$(file "$PARAM_DIR/sapling-output.params")
-
-          echo "$SPEND_TYPE"
-          echo "$OUTPUT_TYPE"
-
-          if echo "$SPEND_TYPE" | grep -qiE 'HTML|text'; then
-            echo "ERROR: Sapling spend download is not a binary parameter file."
-            exit 1
-          fi
-
-          if echo "$OUTPUT_TYPE" | grep -qiE 'HTML|text'; then
-            echo "ERROR: Sapling output download is not a binary parameter file."
-            exit 1
-          fi
-
-          echo "External Ycash parameters downloaded successfully."
-
-      - name: Verify external parameters
+      - name: Verify Sapling parameters
         working-directory: ${{ steps.project.outputs.path }}
         shell: bash
         run: |
@@ -217,19 +183,23 @@ jobs:
 
           PARAM_DIR="packages/ycash_core_ffi/rust/vendor/yecshell-lib/zcash-params"
 
-          test -s "$PARAM_DIR/sapling-spend.params"
-          test -s "$PARAM_DIR/sapling-output.params"
+          # Exactly the hashes LightClient::set_sapling_params checks. The old
+          # step printed checksums and carried on, so a swapped pair passed
+          # silently; --check makes a mismatch fail the build here instead of
+          # inside the prover at send time.
+          SPEND_HASH="8e48ffd23abb3a5fd9c5589204f32d9c31285a04b78096ba40a79b75677efc13"
+          OUTPUT_HASH="2f0ebbcbb9bb0bcffe95a397e7eba89c29eb4dde6191c339db88570e3f3fb0e4"
 
-          echo "External Ycash parameters are present."
+          echo "${SPEND_HASH}  ${PARAM_DIR}/sapling-spend.params"   | sha256sum --check
+          echo "${OUTPUT_HASH}  ${PARAM_DIR}/sapling-output.params" | sha256sum --check
 
-          ls -lh \
-            "$PARAM_DIR/sapling-spend.params" \
-            "$PARAM_DIR/sapling-output.params"
+          # Independent of the hashes: spend is ~47.9 MB, output ~3.6 MB. If
+          # these ever come out reversed, the two files have been swapped.
+          test "$(stat -c%s "${PARAM_DIR}/sapling-spend.params")"  -eq 47958396
+          test "$(stat -c%s "${PARAM_DIR}/sapling-output.params")" -eq 3592860
 
-          echo "SHA-256 checksums of downloaded parameters:"
-          sha256sum \
-            "$PARAM_DIR/sapling-spend.params" \
-            "$PARAM_DIR/sapling-output.params"
+          echo "Sapling parameters verified."
+          ls -lh "${PARAM_DIR}"/sapling-*.params
 
       - name: Install cargo-ndk
         shell: bash
